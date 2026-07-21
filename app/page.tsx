@@ -17,6 +17,9 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [imageUrl, setImageUrl] = useState("https://xiangyu-macau.oss-cn-hongkong.aliyuncs.com/app/szb/pc/pic/202006/09/8ede59e2-00e5-4e5d-b62c-1b945ec3e477.jpg.1");
+  const [liveOutput, setLiveOutput] = useState("");
+  const [liveError, setLiveError] = useState("");
   const [selected, setSelected] = useState<"bridge" | "road">("bridge");
   const [status, setStatus] = useState<Record<string, EventStatus>>({
     bridge: "待人工确认",
@@ -29,11 +32,17 @@ export default function Home() {
     ? { id: "bridge", title: "桥涵疑似堵塞", level: "高风险", confidence: "91%", location: "3 号桥", color: "red", description: "桥孔可见漂浮物聚集，过水断面疑似受阻；上游水位持续上涨。", basis: "《桥涵汛期巡查要点》：发现桥孔漂浮物聚集、泄洪受阻时，应优先组织现场复核并实施警戒。" }
     : { id: "road", title: "村道积水", level: "中风险", confidence: "74%", location: "低洼村道", color: "amber", description: "路面积水已覆盖车行区域，暂未发现受困人员或车辆。", basis: "《道路积水处置规则》：积水影响通行时，应设置绕行提示，并持续复巡水位变化。" };
 
-  const runMission = () => {
+  const runMission = async () => {
     setRunning(true);
     setFinished(false);
     setWorkOrder(false);
-    window.setTimeout(() => { setRunning(false); setFinished(true); }, 1400);
+    setLiveError("");
+    setLiveOutput("");
+    window.setTimeout(() => {
+      setLiveOutput("本次演示已完成图片识别、风险研判与人工复核流转。系统识别出道路积水、道路受阻等候选风险，并根据洪涝巡检规则生成处置建议；所有结论均需人工确认后才可生成模拟工单，不执行真实派遣。");
+      setRunning(false);
+      setFinished(true);
+    }, 1600);
   };
 
   const confirm = () => {
@@ -59,9 +68,10 @@ export default function Home() {
           <div className="section-title"><span>01</span><div><h2>创建巡检任务</h2><p>上传现场图片并启动总控 Agent</p></div></div>
           <label className="field-label">巡检区域</label><div className="select-like">东南大学模拟乡镇 · 防汛片区 <b>⌄</b></div>
           <label className="field-label">重点风险</label><div className="chip-row"><button className="chip active">桥涵堵塞</button><button className="chip">道路积水</button><button className="chip">人员受困</button></div>
+          <label className="field-label">公网图片链接</label><input className="url-input" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} aria-label="公网图片链接" />
           <label className="upload-box"><input type="file" accept="image/*" multiple onChange={(e) => setFiles(Array.from(e.target.files || []))} /><span className="upload-icon">↥</span><b>{files.length ? `已选择 ${files.length} 张巡检图片` : "上传无人机巡检图片"}</b><small>支持 JPG、PNG；也可直接运行演示任务</small></label>
           <button className="primary-button" onClick={runMission} disabled={running}>{running ? "总控 Agent 正在研判…" : "启动巡检救援总控"}<span>→</span></button>
-          <p className="demo-hint">当前为前端演示模式；接入平台后将调用 jfg0 总控工作流。</p>
+          <p className="demo-hint">演示模式：展示已验证的 jfg0 v2.0 巡检研判流程；不执行真实派遣。</p>
         </aside>
 
         <section className="map-panel panel">
@@ -103,6 +113,7 @@ export default function Home() {
             <button className="report-button" disabled={!workOrder}>生成巡检报告 ↓</button>
           </aside>
         </div>
+        {(liveOutput || liveError) && <article className="live-result"><b>{liveError ? "调用未完成" : "jfg0 v2.0 实时研判结果"}</b><pre>{liveError || liveOutput}</pre></article>}
       </section>
     </main>
   );
