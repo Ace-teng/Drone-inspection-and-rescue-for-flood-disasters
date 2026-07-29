@@ -1,98 +1,62 @@
-# vinext-starter
+# 汛巡智眼｜洪涝灾害无人机巡检救援 Agent
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+面向 AI+赛事赛道一的可运行演示项目。网页通过百炼平台已发布的智能体完成：
 
-## Prerequisites
+`无人机巡检图像（公网 URL） → jfg0 总控 → 任务规划 / jfg2 视觉识别 / RAG 风险研判 → 人工复核 → jfg4 模拟救援工单 → 最终人工审批闭环`
 
-- Node.js `>=22.13.0`
+系统只生成模拟研判和模拟工单，**不执行真实派遣**。
 
-## Quick Start
+## 队员快速启动（Windows）
 
-```bash
-npm install
-npm run dev
-npm run build
+### 1. 下载与安装
+
+```powershell
+git clone https://github.com/Ace-teng/Drone-inspection-and-rescue-for-flood-disasters.git
+cd Drone-inspection-and-rescue-for-flood-disasters
+Copy-Item .env.example .env.local
 ```
 
-This starter does not use `wrangler.jsonc`.
+打开 `.env.local`，仅在本机填写自己取得的 `BAILIAN_APP_KEY`。该文件已被 Git 忽略，不能提交或发送到群聊。
 
-## Included Shape
+### 2. 启动
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+双击 `启动演示.cmd`，或在终端运行：
 
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```powershell
+npm run demo
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+看到“真实演示页：http://127.0.0.1:8788”后，在浏览器打开该地址。
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+> 真实调用需要连接校园网，并且该百炼账号/密钥有调用 jfg0、jfg4 的权限。
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## 使用演示页
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+1. 在左侧“测试素材（已配置公网 URL）”选择任一图片；网页会显示预览，并自动填写百炼可读取的公网图片 URL。
+2. 点击“启动真实巡检研判”，等待 jfg0 依次完成任务规划、视觉识别、知识库风险研判。
+3. 查看事件卡片与平台原始返回；填写人工意见后，可提交修改研判或确认生成模拟工单。
+4. jfg4 生成待审批模拟工单后，选择“审批通过（模拟）”“驳回工单”或“退回复飞核验”。任意决定可撤销并重新审批。
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## 项目结构
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+```text
+├─ real-demo-server.mjs        # 本地网页与百炼真实调用服务
+├─ run-demo.mjs                # 加载本机 .env.local 后启动服务
+├─ 启动演示.cmd                 # Windows 双击启动器
+├─ .env.example                # 仅字段示例，无任何真实密钥
+├─ assets/test-images/         # 6 张测试图、来源授权说明、公网 URL 映射
+├─ docs/                       # 队员协作与竞赛交付说明
+└─ package.json                # Node 依赖与启动命令
+```
 
-## Useful Commands
+## 测试素材与图片访问
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+`assets/test-images/` 包含 6 张用于演示的 JPG 和来源/授权说明。`public-image-urls.json` 保存已配置的 HTTPS 直链；网页选择器会自动使用这些 URL，因此百炼的 jfg2 视觉识别 Agent 能从公网读取图片。
 
-## Learn More
+已验证的真实调用示例：`03_flooded_road_high.jpg` 成功返回“道路积水、Ⅱ级风险、置信度 0.90、需人工复核”。队员验收步骤见 `docs/队员协作与验收说明.md`。
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+## 安全说明
+
+- 不要把 `BAILIAN_APP_KEY`、`.env.local`、百炼账号密码、会话内容推送到 GitHub。
+- 当前演示仅供竞赛模拟和辅助决策；不连接真实救援派遣系统。
+- 公网测试图片用于演示；提交前若需要长期稳定复现，建议迁移到团队可控、公开读的 OSS 存储桶。

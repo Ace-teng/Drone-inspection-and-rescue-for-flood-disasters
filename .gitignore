@@ -40,3 +40,8 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+# 本地真实调用凭据与演示过程数据：绝不提交到仓库
+.env.local
+/data/
+/tools/
+/site-deploy.tar.gz

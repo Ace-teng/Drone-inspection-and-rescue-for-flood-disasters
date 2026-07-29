@@ -1,0 +1,32 @@
+[
+  {
+    "file": "01_bridge_debris_high.jpg",
+    "label": "01｜桥梁杂物堆积（高风险）",
+    "url": "https://h.uguu.se/dSQXxsoM.jpg"
+  },
+  {
+    "file": "02_bridge_debris_medium.jpg",
+    "label": "02｜桥梁杂物堆积（中风险）",
+    "url": "https://n.uguu.se/WBxpsHNF.jpg"
+  },
+  {
+    "file": "03_flooded_road_high.jpg",
+    "label": "03｜道路积水",
+    "url": "https://h.uguu.se/FKqCDzfn.jpg"
+  },
+  {
+    "file": "04_blurred_reflight_check.jpg",
+    "label": "04｜低清晰度，建议复飞",
+    "url": "https://n.uguu.se/onwNsVVv.jpg"
+  },
+  {
+    "file": "05_normal_rural_road.jpg",
+    "label": "05｜正常乡村道路",
+    "url": "https://d.uguu.se/pMXOKTAN.jpg"
+  },
+  {
+    "file": "06_normal_bridge.jpg",
+    "label": "06｜正常桥梁",
+    "url": "https://d.uguu.se/HYcWNrMu.jpg"
+  }
+]
