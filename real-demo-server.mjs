@@ -9,7 +9,7 @@ const agentCode = "c9016857-92a0-4374-a545-3bd9e1e41dd6";
 const agentVersion = "1784657975331";
 const workOrderAgentCode = "20cbc85b-41d2-4b10-9fe3-1a34da5b0281";
 const workOrderAgentVersion = "1784545668658";
-const port = Number(process.env.PORT || (key ? 8788 : 8789));
+const port = Number(process.env.PORT || 8789);
 const upstream = process.env.DEMO_UPSTREAM || (key ? "" : "http://127.0.0.1:8788");
 
 const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>汛巡智眼｜真实智能体演示</title><style>
