@@ -1,11 +1,17 @@
 // 测试辅助：启动一份独立进程的演示服务，跑完即关。
 // 只使用 Node 内置模块，不引入任何依赖。
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 export const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+
+// 每个测试进程用自己的临时运行期目录，避免把测试数据写进仓库里的 data/。
+export const testDataDir = mkdtempSync(join(tmpdir(), "flood-demo-test-"));
+process.on("exit", () => { try { rmSync(testDataDir, { recursive: true, force: true }); } catch { /* 清理失败不影响测试结论 */ } });
 
 export function freePort() {
   return new Promise((resolve, reject) => {
@@ -25,7 +31,7 @@ export async function startDemoServer({ env = {}, timeoutMs = 15000 } = {}) {
   const port = await freePort();
   const child = spawn(process.execPath, [join(repoRoot, "real-demo-server.mjs")], {
     cwd: repoRoot,
-    env: { ...process.env, BAILIAN_APP_KEY: dummyKey, DEMO_UPSTREAM: "", PORT: String(port), ...env },
+    env: { ...process.env, BAILIAN_APP_KEY: dummyKey, DEMO_UPSTREAM: "", DEMO_DATA_DIR: testDataDir, PORT: String(port), ...env },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let stdout = "";

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ephemeralImageHosts } from "../lib/test-images.mjs";
-import { repoRoot, startDemoServer } from "./helpers.mjs";
+import { startDemoServer, testDataDir } from "./helpers.mjs";
 
 let server;
 before(async () => { server = await startDemoServer(); });
@@ -109,7 +109,7 @@ test("模拟工单审批可以落盘，并且拒绝非法决策", async () => {
   const rejected = await server.postJson("/api/disposition", { workOrderId, decision: "reject", previousDecision: "approve" });
   assert.equal(rejected.status, 200);
 
-  const lines = readFileSync(join(repoRoot, "data", "workorder-dispositions.jsonl"), "utf8").trim().split(/\r?\n/);
+  const lines = readFileSync(join(testDataDir, "workorder-dispositions.jsonl"), "utf8").trim().split(/\r?\n/);
   const mine = lines.map(line => JSON.parse(line)).filter(item => item.workOrderId === workOrderId);
   assert.equal(mine.length, 2);
   assert.deepEqual(mine.map(item => item.decision), ["approve", "reject"]);
@@ -135,4 +135,27 @@ test("只有首页提供演示页，其他未知路由一律 404", async () => {
   for (const path of ["/no-such-path", "/.env.local", "/package.json", "/lib/agent-gateway.mjs", "/data/workorder-dispositions.jsonl"]) {
     assert.equal((await server.get(path)).status, 404, `${path} 不应该返回内容`);
   }
+});
+
+test("中文备注被拆到多个 TCP 分片时也不会乱码", async () => {
+  const { request } = await import("node:http");
+  const note = "手工复核：桥涵疑似堵塞，建议现场复核并警戒";
+  const body = Buffer.from(JSON.stringify({ workOrderId: "WO-DEMO-TEST-UTF8", decision: "approve", note }), "utf8");
+  // 故意在一个中文字符的字节中间切开请求体。
+  const cut = body.indexOf(Buffer.from("手", "utf8")) + 1;
+
+  const record = await new Promise((done, fail) => {
+    const req = request({ host: "127.0.0.1", port: server.port, path: "/api/disposition", method: "POST", headers: { "Content-Type": "application/json" } }, res => {
+      let raw = "";
+      res.setEncoding("utf8");
+      res.on("data", chunk => { raw += chunk; });
+      res.on("end", () => done(JSON.parse(raw)));
+    });
+    req.on("error", fail);
+    req.write(body.subarray(0, cut));
+    req.write(body.subarray(cut));
+    req.end();
+  });
+
+  assert.equal(record.note, note, "跨分片的中文备注被解码坏了");
 });

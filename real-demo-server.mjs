@@ -4,12 +4,12 @@ import { createReadStream, existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadTestImageCatalog, resolveCatalogImage } from "./lib/test-images.mjs";
 import { AgentGatewayError, createAgentClient } from "./lib/agent-gateway.mjs";
+import { dataDir } from "./lib/paths.mjs";
 import {
   UploadError,
   buildObjectKey,
   createStorageDriver,
   describeStorage,
-  localUploadDir,
   maxUploadBytes,
   uploadedKeyPattern,
   validateUpload
@@ -31,6 +31,7 @@ const agentClient = createAgentClient({ apiBase: api, appKey: key, allowLocalIma
 // 上传走对象存储 driver：AccessKey 只在后端环境变量里，页面拿到的只有最终 URL。
 const storage = describeStorage();
 const storageDriver = createStorageDriver({ baseUrl: process.env.DEMO_PUBLIC_BASE_URL || `http://127.0.0.1:${port}` });
+const runtimeDataDir = dataDir();
 console.log(`[对象存储] driver=${storage.driver || "未配置"}，可用=${storage.configured ? "是" : "否"}，单张上限=${(storage.maxBytes / 1024 / 1024).toFixed(1)} MB`);
 if (!storage.configured) console.warn(`[对象存储] ${storage.note}${storage.missingEnv.length ? ` 缺少：${storage.missingEnv.join("、")}` : ""}`);
 
@@ -320,8 +321,9 @@ async function recordDisposition(body) {
     simulationOnly: true,
     dispatchExecuted: false
   };
-  await mkdir(new URL("./data/", import.meta.url), { recursive: true });
-  await appendFile(new URL("./data/workorder-dispositions.jsonl", import.meta.url), `${JSON.stringify(record)}\n`, "utf8");
+  // 运行期目录可用 DEMO_DATA_DIR 覆盖，自动化测试因此不会写进真实审计记录。
+  await mkdir(runtimeDataDir, { recursive: true });
+  await appendFile(join(runtimeDataDir, "workorder-dispositions.jsonl"), `${JSON.stringify(record)}\n`, "utf8");
   return record;
 }
 
@@ -398,7 +400,7 @@ createServer(async (req,res)=>{
   if(isRead(req)&&req.url?.startsWith('/uploaded-image/')){
     const objectKey=decodeURIComponent(req.url.slice('/uploaded-image/'.length).split('?')[0]);
     if(storageDriver.name!=='local'||!uploadedKeyPattern.test(objectKey))return sendPlain(res,404,'上传图片不存在');
-    const file=join(localUploadDir,objectKey);
+    const file=join(storageDriver.root,objectKey);
     if(!existsSync(file))return sendPlain(res,404,'上传图片不存在');
     return sendFile(req,res,file,objectKey.endsWith('.png')?'image/png':'image/jpeg');
   }
@@ -417,7 +419,7 @@ createServer(async (req,res)=>{
     });
   }
   if (upstream && (req.url==='/api/image' || (req.method==='POST' && ['/api/mission','/api/review','/api/workorder'].includes(req.url)))) {
-    try { let proxyBody; if(req.method==='POST'){proxyBody='';for await(const chunk of req)proxyBody+=chunk} const response = await fetch(`${upstream}${req.url}`, { method:req.method, headers:req.method==='POST'?{'Content-Type':'application/json'}:undefined, body:proxyBody }); const bytes=Buffer.from(await response.arrayBuffer()); res.writeHead(response.status,Object.fromEntries(response.headers)); return res.end(bytes); }
+    try { let proxyBody; if(req.method==='POST'){const parts=[];for await(const chunk of req)parts.push(chunk);proxyBody=Buffer.concat(parts)} const response = await fetch(`${upstream}${req.url}`, { method:req.method, headers:req.method==='POST'?{'Content-Type':'application/json'}:undefined, body:proxyBody }); const bytes=Buffer.from(await response.arrayBuffer()); res.writeHead(response.status,Object.fromEntries(response.headers)); return res.end(bytes); }
     catch { res.writeHead(502); return res.end('upstream unavailable'); }
   }
   // 默认预览图代理素材清单里的 defaultSource，源地址不再硬编码在代码里。
@@ -430,10 +432,11 @@ createServer(async (req,res)=>{
   // 也会拿到 200，看起来仿佛服务在提供这些文件。
   if(req.method==='GET'&&(req.url==='/'||req.url==='/index.html'||req.url?.startsWith('/?'))){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(uploadDemoPage)}
   if(req.method==='POST'&&(req.url==='/api/mission'||req.url==='/api/review'||req.url==='/api/workorder'||req.url==='/api/disposition')){
-    let raw='';req.on('data',c=>raw+=c);
+    // 按 Buffer 收集再整体解码：直接用字符串累加会把跨 chunk 切开的中文拆坏。
+    const parts=[];req.on('data',c=>parts.push(c));
     req.on('end',async()=>{
       let input;
-      try{input=JSON.parse(raw)}catch{return sendJson(res,400,{error:'【input.invalid】请求体不是合法 JSON。',stage:'input.invalid',hint:'请检查前端提交的数据；正常操作不会出现这个错误。',platformFault:false,externalBlocker:false})}
+      try{input=JSON.parse(Buffer.concat(parts).toString('utf8'))}catch{return sendJson(res,400,{error:'【input.invalid】请求体不是合法 JSON。',stage:'input.invalid',hint:'请检查前端提交的数据；正常操作不会出现这个错误。',platformFault:false,externalBlocker:false})}
       try{
         const data=await (req.url==='/api/mission'?mission(input):req.url==='/api/review'?review(input):req.url==='/api/workorder'?createWorkOrder(input):recordDisposition(input));
         return sendJson(res,200,data);
