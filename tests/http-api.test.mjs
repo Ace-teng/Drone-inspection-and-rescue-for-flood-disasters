@@ -127,7 +127,12 @@ test("审批意见长度被截断到 500 字", async () => {
   assert.equal((await response.json()).note.length, 500);
 });
 
-test("未知的 POST 路由返回 404，GET 一律回落到演示页（现有行为）", async () => {
+test("只有首页提供演示页，其他未知路由一律 404", async () => {
   assert.equal((await server.postJson("/api/no-such-endpoint", {})).status, 404);
-  assert.equal((await server.get("/no-such-path")).status, 200);
+  assert.equal((await server.get("/")).status, 200);
+  assert.equal((await server.get("/index.html")).status, 200);
+  assert.equal((await server.get("/?debug=1")).status, 200);
+  for (const path of ["/no-such-path", "/.env.local", "/package.json", "/lib/agent-gateway.mjs", "/data/workorder-dispositions.jsonl"]) {
+    assert.equal((await server.get(path)).status, 404, `${path} 不应该返回内容`);
+  }
 });

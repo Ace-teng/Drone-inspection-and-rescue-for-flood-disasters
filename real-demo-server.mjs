@@ -1,8 +1,19 @@
 import { createServer } from "node:http";
 import { appendFile, mkdir } from "node:fs/promises";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
+import { join } from "node:path";
 import { loadTestImageCatalog, resolveCatalogImage } from "./lib/test-images.mjs";
 import { AgentGatewayError, createAgentClient } from "./lib/agent-gateway.mjs";
+import {
+  UploadError,
+  buildObjectKey,
+  createStorageDriver,
+  describeStorage,
+  localUploadDir,
+  maxUploadBytes,
+  uploadedKeyPattern,
+  validateUpload
+} from "./lib/object-storage.mjs";
 
 const key = process.env.BAILIAN_APP_KEY;
 const api = process.env.BAILIAN_API_BASE || "http://10.128.203.200:80/sfm-agent-studio/sfm-api-gateway/gateway/agent/api";
@@ -17,6 +28,11 @@ const upstream = process.env.DEMO_UPSTREAM || "";
 // 默认拒绝本机地址的图片链接（平台读不到）；只有自建隧道或本地自动化测试才放行。
 const allowLocalImageUrls = /^(1|true|yes|on)$/i.test(process.env.DEMO_ALLOW_LOCAL_IMAGE_URLS || "");
 const agentClient = createAgentClient({ apiBase: api, appKey: key, allowLocalImageUrls });
+// 上传走对象存储 driver：AccessKey 只在后端环境变量里，页面拿到的只有最终 URL。
+const storage = describeStorage();
+const storageDriver = createStorageDriver({ baseUrl: process.env.DEMO_PUBLIC_BASE_URL || `http://127.0.0.1:${port}` });
+console.log(`[对象存储] driver=${storage.driver || "未配置"}，可用=${storage.configured ? "是" : "否"}，单张上限=${(storage.maxBytes / 1024 / 1024).toFixed(1)} MB`);
+if (!storage.configured) console.warn(`[对象存储] ${storage.note}${storage.missingEnv.length ? ` 缺少：${storage.missingEnv.join("、")}` : ""}`);
 
 const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>汛巡智眼｜真实智能体演示</title><style>
 *{box-sizing:border-box}body{margin:0;background:#eef4f8;color:#17324d;font-family:"Microsoft YaHei",Arial,sans-serif}.bar{height:68px;background:#fff;display:flex;align-items:center;padding:0 max(5vw,28px);justify-content:space-between;border-bottom:1px solid #dce7ef}.brand{font-size:22px;font-weight:800;color:#1165d3}.tag{color:#148657;background:#e8f8ef;border-radius:20px;padding:7px 12px;font-size:13px}.hero{padding:38px max(7vw,28px);background:linear-gradient(115deg,#0b4f9e,#1474d5);color:#fff}.hero h1{margin:0;font-size:34px}.hero p{opacity:.88}.grid{max-width:1240px;margin:25px auto;display:grid;grid-template-columns:360px 1fr;gap:20px;padding:0 18px}.card{background:#fff;border-radius:14px;padding:22px;box-shadow:0 7px 24px #1b4d7420}.card h2{font-size:18px;margin:0 0 16px}.label{display:block;font-size:13px;color:#60748a;margin:16px 0 7px}input,textarea{width:100%;border:1px solid #ccdbe7;border-radius:8px;padding:11px;font:14px inherit}textarea{height:100px;resize:vertical}button{width:100%;margin-top:18px;background:#1269d4;color:white;border:0;border-radius:8px;padding:13px;font-weight:700;font-size:15px;cursor:pointer}button:disabled{background:#91afd1}.secondary{background:#fff;border:1px solid #9fb6ca;color:#315574}.review-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}.review-actions button{font-size:13px}.steps{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 22px}.step{padding:8px 12px;background:#eef3f8;border-radius:18px;font-size:13px}.step.active{background:#ddebff;color:#1269d4}.status{padding:14px;border-radius:8px;background:#f3f8fc;color:#456078;line-height:1.7;white-space:pre-wrap}.result{display:none;margin-top:16px;border-top:1px solid #e3ebf1;padding-top:16px}.event{position:relative;margin-top:12px;padding:14px;border:1px solid #d7e5ef;border-left:4px solid #e99a28;border-radius:8px;background:#fff}.event b{font-size:15px}.event p{font-size:13px;line-height:1.6;margin:8px 0}.level{float:right;padding:3px 9px;border-radius:14px;background:#fff2e5;color:#a65211;font-size:12px;font-weight:bold}.result pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7fafc;padding:15px;border-radius:8px;line-height:1.65;color:#29455d;font-size:13px}.note{font-size:12px;color:#71849a;line-height:1.6}@media(max-width:800px){.grid{grid-template-columns:1fr}.hero h1{font-size:26px}.review-actions{grid-template-columns:1fr}}
@@ -43,7 +59,7 @@ const sourceOptions = [`<option value="">${escapeHtml(catalog.defaultSource.labe
 
 const demoPage = page
   .replace(/<input id="url" value="[^"]*">/, `<input id="url" value="${escapeHtml(catalog.defaultSource.publicUrl || "")}" placeholder="https://…（公网可访问的 JPG/PNG 直链）">`)
-  .replace('<label class="label">公网图片链接</label>', `<label class="label">测试素材</label><select id="localSourcePicker" style="width:100%;border:1px solid #ccdbe7;border-radius:8px;padding:10px;background:#fff;font:14px inherit">${sourceOptions}</select><p id="localSourceHint" class="note">选择测试素材后可在本页预览。真实智能体调用需要公网可访问的直链：素材清单里配置了直链会自动带入，否则请在下方自行填写。</p><label class="label">无人机巡检影像</label><img id="inspectionPreview" src="/api/image" alt="洪涝无人机巡检影像" style="width:100%;height:180px;object-fit:cover;border-radius:8px;border:1px solid #ccdbe7"><label class="label">公网图片链接</label>`);
+  .replace('<label class="label">公网图片链接</label>', `<label class="label">测试素材</label><select id="localSourcePicker" style="width:100%;border:1px solid #ccdbe7;border-radius:8px;padding:10px;background:#fff;font:14px inherit">${sourceOptions}</select><p id="localSourceHint" class="note">选择测试素材后可在本页预览。真实智能体调用需要公网可访问的直链：素材清单里配置了直链会自动带入，否则请在下方自行填写。</p><label class="label">上传本机图片（JPG/PNG）</label><input type="file" id="uploadFile" accept="image/jpeg,image/png" style="padding:9px;background:#fff"><button class="secondary" id="uploadBtn" type="button">上传并作为巡检图片</button><p id="uploadHint" class="note">上传后由后端存入对象存储，并把返回的公网直链填入下方“公网图片链接”。密钥只在后端环境变量中，不会出现在本页面。</p><label class="label">无人机巡检影像</label><img id="inspectionPreview" src="/api/image" alt="洪涝无人机巡检影像" style="width:100%;height:180px;object-fit:cover;border-radius:8px;border:1px solid #ccdbe7"><label class="label">公网图片链接</label>`);
 
 const renderedDemoPage = demoPage.replace('</script></body></html>', `</script><script>
 (() => {
@@ -166,6 +182,75 @@ const approvalDemoPage = renderedDemoPage.replace('</body></html>', `<script>
 })();
 </script></body></html>`);
 
+// 上传逻辑单独一层：文件直接以原始二进制 PUT 给后端，不需要 multipart 解析依赖。
+const uploadDemoPage = approvalDemoPage.replace('</body></html>', `<script>
+(() => {
+  const fileInput = document.querySelector('#uploadFile');
+  const uploadButton = document.querySelector('#uploadBtn');
+  const uploadHint = document.querySelector('#uploadHint');
+  const urlField = document.querySelector('#url');
+  const preview = document.querySelector('#inspectionPreview');
+  const picker = document.querySelector('#localSourcePicker');
+  let config = null;
+  let objectUrl = '';
+
+  const megabytes = bytes => (bytes / 1024 / 1024).toFixed(2) + ' MB';
+
+  async function loadConfig() {
+    try {
+      config = await (await fetch('/api/upload-config')).json();
+    } catch { config = null; }
+    if (!config) { uploadHint.textContent = '无法读取上传配置：本地演示服务可能已停止。'; uploadButton.disabled = true; return; }
+    if (!config.configured) {
+      uploadButton.disabled = true;
+      uploadHint.textContent = '对象存储尚未配置，暂时无法上传。' + config.note
+        + (config.missingEnv && config.missingEnv.length ? '（缺少后端环境变量：' + config.missingEnv.join('、') + '）' : '');
+      return;
+    }
+    uploadHint.textContent = '支持 JPG/PNG，单张不超过 ' + megabytes(config.maxBytes) + '。上传后自动填入下方公网图片链接。'
+      + (config.publicUrls ? '' : '注意：当前是本地存储 driver，生成的是本机地址，平台读不到，仅供本地联调。');
+  }
+
+  fileInput.onchange = () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = URL.createObjectURL(file);
+    preview.src = objectUrl;
+    if (picker) picker.value = '';
+    const tooBig = config && config.configured && file.size > config.maxBytes;
+    const badType = !['image/jpeg', 'image/png'].includes(file.type);
+    uploadHint.textContent = badType
+      ? '只支持 JPG 和 PNG，当前文件类型是 ' + (file.type || '未知') + '。'
+      : tooBig
+        ? '文件 ' + megabytes(file.size) + ' 超过上限 ' + megabytes(config.maxBytes) + '，请压缩后再上传。'
+        : '已选择：' + file.name + '（' + megabytes(file.size) + '）。点击“上传并作为巡检图片”。';
+    uploadButton.disabled = badType || tooBig || !(config && config.configured);
+  };
+
+  uploadButton.onclick = async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) { uploadHint.textContent = '请先选择一张 JPG 或 PNG 图片。'; return; }
+    const buttons = [...document.querySelectorAll('button')];
+    buttons.forEach(x => x.disabled = true);
+    uploadHint.textContent = '正在上传到对象存储…';
+    try {
+      const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+      const data = await response.json();
+      if (!response.ok) throw Error(failureText(data, '上传失败'));
+      urlField.value = data.url;
+      uploadHint.textContent = '上传成功（' + megabytes(data.bytes) + '，driver=' + data.driver + '）。已填入公网图片链接，可直接启动巡检研判。';
+    } catch (e) {
+      uploadHint.textContent = '上传失败：' + e.message;
+    } finally {
+      buttons.forEach(x => x.disabled = false);
+    }
+  };
+
+  loadConfig();
+})();
+</script></body></html>`);
+
 // 本地输入校验单独成一类错误：这类问题该由调用方修，不该报给平台维护方。
 function invalidInput(message, hint) {
   return new AgentGatewayError("input.invalid", `【input.invalid】${message}`, { hint, responseStatus: 400 });
@@ -242,14 +327,90 @@ async function recordDisposition(body) {
 
 const sendJson = (res, status, payload) => { res.writeHead(status, {"Content-Type":"application/json; charset=utf-8"}); res.end(JSON.stringify(payload)); };
 
-createServer(async (req,res)=>{
-  if(req.method==='GET'&&req.url?.startsWith('/local-test-image/')){
-    const image=resolveCatalogImage(catalog,decodeURIComponent(req.url.slice('/local-test-image/'.length).split('?')[0]));
-    if(!image){res.writeHead(404,{"Content-Type":"text/plain; charset=utf-8"});return res.end('素材不存在或未登记在素材清单中')}
-    res.writeHead(200,{"Content-Type":image.contentType,"Cache-Control":"no-store"});
-    return createReadStream(image.path).pipe(res);
+// 图片路由必须同时支持 HEAD：图片可访问性检查（以及很多平台的取图逻辑）先发 HEAD。
+const isRead = req => req.method === "GET" || req.method === "HEAD";
+const sendFile = (req, res, file, contentType) => {
+  res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
+  if (req.method === "HEAD") return res.end();
+  return createReadStream(file).pipe(res);
+};
+const sendPlain = (res, status, text) => { res.writeHead(status, {"Content-Type":"text/plain; charset=utf-8"}); res.end(text); };
+
+// 读取请求体，超过上限立刻停止读取，不把整张大图先收进内存再拒绝。
+async function readLimitedBody(req, limitBytes) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > limitBytes) {
+      req.destroy();
+      throw new UploadError("upload.too_large", `【upload.too_large】上传内容超过上限 ${(limitBytes / 1024 / 1024).toFixed(2)} MB，已中断接收。`, {
+        hint: "请压缩图片后重试，或调整环境变量 UPLOAD_MAX_BYTES。",
+        responseStatus: 413,
+        diagnostics: { limitBytes }
+      });
+    }
+    chunks.push(chunk);
   }
-  if(req.method==='GET'&&req.url==='/api/test-images'){
+  return Buffer.concat(chunks);
+}
+
+async function handleUpload(req) {
+  const limitBytes = maxUploadBytes();
+  const declared = req.headers["content-type"];
+  const length = Number(req.headers["content-length"]);
+  if (Number.isFinite(length) && length > limitBytes) {
+    throw new UploadError("upload.too_large", `【upload.too_large】图片 ${(length / 1024 / 1024).toFixed(2)} MB 超过上限 ${(limitBytes / 1024 / 1024).toFixed(2)} MB。`, {
+      hint: "请压缩图片后重试，或调整环境变量 UPLOAD_MAX_BYTES。",
+      responseStatus: 413,
+      diagnostics: { bytes: length, limitBytes }
+    });
+  }
+  const buffer = await readLimitedBody(req, limitBytes);
+  const { contentType, extension, bytes } = validateUpload({ buffer, declaredType: declared, limitBytes });
+  const objectKey = buildObjectKey({ prefix: storageDriver.prefix, extension });
+  try {
+    const stored = await storageDriver.put({ buffer, contentType, objectKey });
+    console.log(`[上传] driver=${storageDriver.name} key=${stored.objectKey} bytes=${bytes}`);
+    return { url: stored.url, objectKey: stored.objectKey, bytes, contentType, driver: storageDriver.name, publicUrl: Boolean(storageDriver.publicUrls) };
+  } catch (error) {
+    if (error instanceof UploadError) throw error;
+    // 存储侧失败要说清是存储失败，而不是含糊的“上传失败”。
+    throw new UploadError("upload.storage_failed", `【upload.storage_failed】写入对象存储失败：${String(error?.message || error).slice(0, 200)}`, {
+      hint: "请检查对象存储配置（Bucket、Region、权限）与网络连通性；后端终端有完整日志。",
+      responseStatus: 502,
+      diagnostics: { driver: storageDriver.name }
+    });
+  }
+}
+
+createServer(async (req,res)=>{
+  if(isRead(req)&&req.url?.startsWith('/local-test-image/')){
+    const image=resolveCatalogImage(catalog,decodeURIComponent(req.url.slice('/local-test-image/'.length).split('?')[0]));
+    if(!image)return sendPlain(res,404,'素材不存在或未登记在素材清单中');
+    return sendFile(req,res,image.path,image.contentType);
+  }
+  if(isRead(req)&&req.url==='/api/upload-config'){
+    const summary=describeStorage();
+    return sendJson(res,200,{...summary,publicUrls:Boolean(storageDriver.publicUrls)});
+  }
+  // 本地 driver 存下来的图片：仅开发联调用，键名必须严格匹配生成规则。
+  if(isRead(req)&&req.url?.startsWith('/uploaded-image/')){
+    const objectKey=decodeURIComponent(req.url.slice('/uploaded-image/'.length).split('?')[0]);
+    if(storageDriver.name!=='local'||!uploadedKeyPattern.test(objectKey))return sendPlain(res,404,'上传图片不存在');
+    const file=join(localUploadDir,objectKey);
+    if(!existsSync(file))return sendPlain(res,404,'上传图片不存在');
+    return sendFile(req,res,file,objectKey.endsWith('.png')?'image/png':'image/jpeg');
+  }
+  if(req.method==='POST'&&req.url==='/api/upload'){
+    try{return sendJson(res,200,await handleUpload(req))}
+    catch(error){
+      if(typeof error?.toPayload==='function'){console.error(`[上传失败] ${error.stage}｜${error.message}`);return sendJson(res,error.responseStatus,error.toPayload())}
+      console.error(`[上传失败] 未预期错误：${error?.stack||error}`);
+      return sendJson(res,500,{error:'【unexpected】上传处理时发生未预期错误。',stage:'unexpected',hint:'请查看运行 npm run demo 的终端日志。',platformFault:false,externalBlocker:false});
+    }
+  }
+  if(isRead(req)&&req.url==='/api/test-images'){
     return sendJson(res,200,{
       defaultSource:{label:catalog.defaultSource.label,publicUrl:catalog.defaultSource.publicUrl,publicUrlNote:catalog.defaultSource.publicUrlNote,overridden:catalog.defaultSource.overridden},
       images:catalog.images.map(({file,label,scenario,publicUrl,bytes,contentType})=>({file,label,scenario,publicUrl,bytes,contentType,previewUrl:`/local-test-image/${encodeURIComponent(file)}`}))
@@ -260,12 +421,14 @@ createServer(async (req,res)=>{
     catch { res.writeHead(502); return res.end('upstream unavailable'); }
   }
   // 默认预览图代理素材清单里的 defaultSource，源地址不再硬编码在代码里。
-  if(req.method==='GET'&&req.url==='/api/image'){
-    if(!catalog.defaultSource.publicUrl){res.writeHead(404,{"Content-Type":"text/plain; charset=utf-8"});return res.end('素材清单未配置默认演示图片')}
+  if(isRead(req)&&req.url==='/api/image'){
+    if(!catalog.defaultSource.publicUrl)return sendPlain(res,404,'素材清单未配置默认演示图片');
     try{const image=await fetch(catalog.defaultSource.publicUrl);if(!image.ok)throw Error(`HTTP ${image.status}`);const bytes=Buffer.from(await image.arrayBuffer());res.writeHead(200,{"Content-Type":image.headers.get('content-type')?.startsWith('image/')?image.headers.get('content-type'):'image/jpeg',"Content-Length":bytes.length,"Cache-Control":"no-store"});return res.end(bytes)}
-    catch(error){console.warn(`[默认预览图] 读取失败：${error.message}`);res.writeHead(502,{"Content-Type":"text/plain; charset=utf-8"});return res.end('默认演示图片当前不可访问')}
+    catch(error){console.warn(`[默认预览图] 读取失败：${error.message}`);return sendPlain(res,502,'默认演示图片当前不可访问')}
   }
-  if(req.method==='GET'){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(approvalDemoPage)}
+  // 只有首页返回演示页。以前任何 GET 路径都回落到演示页，像 /.env.local 这类请求
+  // 也会拿到 200，看起来仿佛服务在提供这些文件。
+  if(req.method==='GET'&&(req.url==='/'||req.url==='/index.html'||req.url?.startsWith('/?'))){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(uploadDemoPage)}
   if(req.method==='POST'&&(req.url==='/api/mission'||req.url==='/api/review'||req.url==='/api/workorder'||req.url==='/api/disposition')){
     let raw='';req.on('data',c=>raw+=c);
     req.on('end',async()=>{
@@ -275,7 +438,7 @@ createServer(async (req,res)=>{
         const data=await (req.url==='/api/mission'?mission(input):req.url==='/api/review'?review(input):req.url==='/api/workorder'?createWorkOrder(input):recordDisposition(input));
         return sendJson(res,200,data);
       }catch(error){
-        if(error instanceof AgentGatewayError){
+        if(typeof error?.toPayload==='function'){
           // 平台侧故障和本地问题在日志里也要分开，方便判断该找谁。
           console.error(`[${error.platformFault?'平台故障':'调用失败'}] ${error.stage}｜${error.message}`);
           return sendJson(res,error.responseStatus,error.toPayload());
