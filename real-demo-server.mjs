@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { appendFile, mkdir } from "node:fs/promises";
-import { createReadStream, existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { createReadStream } from "node:fs";
+import { loadTestImageCatalog, resolveCatalogImage } from "./lib/test-images.mjs";
 
 const key = process.env.BAILIAN_APP_KEY;
 const api = "http://10.128.203.200:80/sfm-agent-studio/sfm-api-gateway/gateway/agent/api";
@@ -24,8 +24,18 @@ async function workOrderCall(){setBusy(true);status.textContent='正在调用 jf
 document.querySelector('#confirm').onclick=workOrderCall;document.querySelector('#cancel').onclick=()=>{const workorder=document.querySelector('#workorder');if(workorder){workorder.style.display='none';document.querySelector('#workorderCard').innerHTML='';document.querySelector('#workorderOutput').textContent=''}const final=document.querySelector('#finalDisposition');if(final){final.style.display='none';const feedback=document.querySelector('#finalFeedback');if(feedback){feedback.style.display='none';feedback.textContent=''}final.querySelectorAll('button').forEach(x=>x.disabled=false)}const panel=document.querySelector('#reviewReplyPanel');panel.style.display='none';reviewOut.textContent='';status.textContent='取消处置已完成：本次仅保留风险研判报告，模拟工单已撤销，未提交新的平台任务。'};document.querySelector('#modify').onclick=()=>{const t=document.querySelector('#reviewText').value.trim();reviewCall(t.startsWith('修改研判：')?t:'修改研判：'+(t||'请降低风险等级并补充人工复核依据'))};
 </script></body></html>`;
 
-const publicTestImages = {"01_bridge_debris_high.jpg":"https://h.uguu.se/dSQXxsoM.jpg","02_bridge_debris_medium.jpg":"https://n.uguu.se/WBxpsHNF.jpg","03_flooded_road_high.jpg":"https://h.uguu.se/FKqCDzfn.jpg","04_blurred_reflight_check.jpg":"https://n.uguu.se/onwNsVVv.jpg","05_normal_rural_road.jpg":"https://d.uguu.se/pMXOKTAN.jpg","06_normal_bridge.jpg":"https://d.uguu.se/HYcWNrMu.jpg"};
-const demoPage = page.replace('<label class="label">公网图片链接</label>', '<label class="label">测试素材（已配置公网 URL）</label><select id="localSourcePicker" style="width:100%;border:1px solid #ccdbe7;border-radius:8px;padding:10px;background:#fff;font:14px inherit"><option value="">默认洪涝航拍图</option><option value="01_bridge_debris_high.jpg">01｜桥梁杂物堆积（高风险）</option><option value="02_bridge_debris_medium.jpg">02｜桥梁杂物堆积（中风险）</option><option value="03_flooded_road_high.jpg">03｜道路积水</option><option value="04_blurred_reflight_check.jpg">04｜低清晰度，建议复飞</option><option value="05_normal_rural_road.jpg">05｜正常乡村道路</option><option value="06_normal_bridge.jpg">06｜正常桥梁</option></select><p id="localSourceHint" class="note">选择测试图后，网页会自动带入该图的公网直链；百炼可直接读取并进行真实研判。</p><label class="label">无人机巡检影像</label><img id="inspectionPreview" src="/api/image" alt="洪涝无人机巡检影像" style="width:100%;height:180px;object-fit:cover;border-radius:8px;border:1px solid #ccdbe7"><label class="label">公网图片链接</label>');
+// 素材清单只在这里读取一次；网页选择器、/api/test-images 和本地预览都用同一份数据。
+const catalog = loadTestImageCatalog();
+for (const warning of catalog.warnings) console.warn(`[素材清单] ${warning}`);
+
+const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const sourceOptions = [`<option value="">${escapeHtml(catalog.defaultSource.label)}</option>`]
+  .concat(catalog.images.map(image => `<option value="${escapeHtml(image.file)}">${escapeHtml(image.label)}</option>`))
+  .join("");
+
+const demoPage = page
+  .replace(/<input id="url" value="[^"]*">/, `<input id="url" value="${escapeHtml(catalog.defaultSource.publicUrl || "")}" placeholder="https://…（公网可访问的 JPG/PNG 直链）">`)
+  .replace('<label class="label">公网图片链接</label>', `<label class="label">测试素材</label><select id="localSourcePicker" style="width:100%;border:1px solid #ccdbe7;border-radius:8px;padding:10px;background:#fff;font:14px inherit">${sourceOptions}</select><p id="localSourceHint" class="note">选择测试素材后可在本页预览。真实智能体调用需要公网可访问的直链：素材清单里配置了直链会自动带入，否则请在下方自行填写。</p><label class="label">无人机巡检影像</label><img id="inspectionPreview" src="/api/image" alt="洪涝无人机巡检影像" style="width:100%;height:180px;object-fit:cover;border-radius:8px;border:1px solid #ccdbe7"><label class="label">公网图片链接</label>`);
 
 const renderedDemoPage = demoPage.replace('</script></body></html>', `</script><script>
 (() => {
@@ -36,16 +46,24 @@ const renderedDemoPage = demoPage.replace('</script></body></html>', `</script><
   const inspectionPreview = document.querySelector('#inspectionPreview');
   const localSourceHint = document.querySelector('#localSourceHint');
   const runButtonForSource = document.querySelector('#run');
-  const publicTestImages = ${JSON.stringify(publicTestImages)};
+  const urlField = document.querySelector('#url');
+  // 素材与直链由后端素材清单派生，前端不再内置任何 URL 映射。
+  const testImageSources = ${JSON.stringify(Object.fromEntries(catalog.images.map(image => [image.file, { label: image.label, publicUrl: image.publicUrl }])))};
+  const defaultPublicUrl = ${JSON.stringify(catalog.defaultSource.publicUrl || "")};
   localSourcePicker.onchange = () => {
     const selected = localSourcePicker.value;
-    inspectionPreview.src = selected ? '/local-test-image/' + selected : '/api/image';
-    const publicUrl = publicTestImages[selected];
-    if (publicUrl) document.querySelector('#url').value = publicUrl;
+    inspectionPreview.src = selected ? '/local-test-image/' + encodeURIComponent(selected) : '/api/image';
     runButtonForSource.disabled = false;
-    localSourceHint.textContent = selected
-      ? '已自动带入该图片的公网直链。点击“启动真实巡检研判”即可由百炼读取当前图片并真实调用 jfg0。'
-      : '当前显示默认洪涝航拍图。真实智能体调用使用下方的公网图片链接。';
+    if (!selected) {
+      urlField.value = defaultPublicUrl;
+      localSourceHint.textContent = '当前显示默认演示图片。真实智能体调用使用下方的公网图片链接。';
+      return;
+    }
+    const publicUrl = testImageSources[selected] && testImageSources[selected].publicUrl;
+    urlField.value = publicUrl || '';
+    localSourceHint.textContent = publicUrl
+      ? '已带入该素材的公网直链。点击“启动真实巡检研判”即可由平台读取当前图片。'
+      : '该测试素材只能在本页预览：平台需要公网可访问的直链，而本机 127.0.0.1 地址平台读不到。请为该素材配置自有对象存储直链（见 assets/test-images/test-image-catalog.json），或直接在下方填写你自己的公网 JPG/PNG 直链。';
   };
   const review = document.querySelector('#review');
   const status = document.querySelector('#status');
@@ -208,13 +226,31 @@ async function recordDisposition(body) {
   return record;
 }
 
+const sendJson = (res, status, payload) => { res.writeHead(status, {"Content-Type":"application/json; charset=utf-8"}); res.end(JSON.stringify(payload)); };
+
 createServer(async (req,res)=>{
-  if(req.method==='GET'&&req.url?.startsWith('/local-test-image/')){const name=basename(req.url.slice('/local-test-image/'.length));const file=join(process.cwd(),'assets','test-images',name);if(!/\.jpg$/i.test(name)||!existsSync(file)){res.writeHead(404);return res.end('not found')}res.writeHead(200,{"Content-Type":"image/jpeg","Cache-Control":"no-store"});return createReadStream(file).pipe(res)}
+  if(req.method==='GET'&&req.url?.startsWith('/local-test-image/')){
+    const image=resolveCatalogImage(catalog,decodeURIComponent(req.url.slice('/local-test-image/'.length).split('?')[0]));
+    if(!image){res.writeHead(404,{"Content-Type":"text/plain; charset=utf-8"});return res.end('素材不存在或未登记在素材清单中')}
+    res.writeHead(200,{"Content-Type":image.contentType,"Cache-Control":"no-store"});
+    return createReadStream(image.path).pipe(res);
+  }
+  if(req.method==='GET'&&req.url==='/api/test-images'){
+    return sendJson(res,200,{
+      defaultSource:{label:catalog.defaultSource.label,publicUrl:catalog.defaultSource.publicUrl,publicUrlNote:catalog.defaultSource.publicUrlNote,overridden:catalog.defaultSource.overridden},
+      images:catalog.images.map(({file,label,scenario,publicUrl,bytes,contentType})=>({file,label,scenario,publicUrl,bytes,contentType,previewUrl:`/local-test-image/${encodeURIComponent(file)}`}))
+    });
+  }
   if (upstream && (req.url==='/api/image' || (req.method==='POST' && ['/api/mission','/api/review','/api/workorder'].includes(req.url)))) {
     try { let proxyBody; if(req.method==='POST'){proxyBody='';for await(const chunk of req)proxyBody+=chunk} const response = await fetch(`${upstream}${req.url}`, { method:req.method, headers:req.method==='POST'?{'Content-Type':'application/json'}:undefined, body:proxyBody }); const bytes=Buffer.from(await response.arrayBuffer()); res.writeHead(response.status,Object.fromEntries(response.headers)); return res.end(bytes); }
     catch { res.writeHead(502); return res.end('upstream unavailable'); }
   }
-  if(req.method==='GET'&&req.url==='/api/image'){try{const image=await fetch('https://xiangyu-macau.oss-cn-hongkong.aliyuncs.com/app/szb/pc/pic/202006/09/8ede59e2-00e5-4e5d-b62c-1b945ec3e477.jpg.1');if(!image.ok)throw Error('image fetch failed');const bytes=Buffer.from(await image.arrayBuffer());res.writeHead(200,{"Content-Type":"image/jpeg","Content-Length":bytes.length,"Cache-Control":"no-store"});return res.end(bytes)}catch{res.writeHead(502);return res.end('image unavailable')}}
+  // 默认预览图代理素材清单里的 defaultSource，源地址不再硬编码在代码里。
+  if(req.method==='GET'&&req.url==='/api/image'){
+    if(!catalog.defaultSource.publicUrl){res.writeHead(404,{"Content-Type":"text/plain; charset=utf-8"});return res.end('素材清单未配置默认演示图片')}
+    try{const image=await fetch(catalog.defaultSource.publicUrl);if(!image.ok)throw Error(`HTTP ${image.status}`);const bytes=Buffer.from(await image.arrayBuffer());res.writeHead(200,{"Content-Type":image.headers.get('content-type')?.startsWith('image/')?image.headers.get('content-type'):'image/jpeg',"Content-Length":bytes.length,"Cache-Control":"no-store"});return res.end(bytes)}
+    catch(error){console.warn(`[默认预览图] 读取失败：${error.message}`);res.writeHead(502,{"Content-Type":"text/plain; charset=utf-8"});return res.end('默认演示图片当前不可访问')}
+  }
   if(req.method==='GET'){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(approvalDemoPage)}
   if(req.method==='POST'&&(req.url==='/api/mission'||req.url==='/api/review'||req.url==='/api/workorder'||req.url==='/api/disposition')){let raw='';req.on('data',c=>raw+=c);req.on('end',async()=>{try{const input=JSON.parse(raw);const data=await (req.url==='/api/mission'?mission(input):req.url==='/api/review'?review(input):req.url==='/api/workorder'?createWorkOrder(input):recordDisposition(input));res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify(data))}catch(e){res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({error:e.message}))}});return}
   res.writeHead(404);res.end();

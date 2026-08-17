@@ -1,0 +1,120 @@
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ephemeralImageHosts } from "../lib/test-images.mjs";
+import { repoRoot, startDemoServer } from "./helpers.mjs";
+
+let server;
+before(async () => { server = await startDemoServer(); });
+after(async () => { await server?.stop(); });
+
+test("首页可以打开且不含任何临时图床直链", async () => {
+  const response = await server.get("/");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  const html = await response.text();
+  for (const host of ephemeralImageHosts) assert.equal(html.includes(host), false, `页面仍引用 ${host}`);
+  assert.match(html, /localSourcePicker/);
+});
+
+test("首页素材选择器由素材清单生成", async () => {
+  const html = await (await server.get("/")).text();
+  const catalog = await (await server.get("/api/test-images")).json();
+  for (const image of catalog.images) {
+    assert.ok(html.includes(`<option value="${image.file}">`), `缺少素材选项 ${image.file}`);
+  }
+});
+
+test("/api/test-images 返回素材清单", async () => {
+  const response = await server.get("/api/test-images");
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.images.length, 6);
+  for (const image of body.images) {
+    assert.equal(typeof image.file, "string");
+    assert.equal(typeof image.label, "string");
+    assert.ok(image.bytes > 0);
+    assert.equal(image.previewUrl, `/local-test-image/${encodeURIComponent(image.file)}`);
+  }
+});
+
+test("本地素材可以预览", async () => {
+  const response = await server.get("/local-test-image/03_flooded_road_high.jpg");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/jpeg");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.ok(bytes.length > 1000);
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xff, 0xd8, 0xff]);
+});
+
+test("素材预览拒绝未登记文件与路径穿越", async () => {
+  for (const path of [
+    "/local-test-image/nope.jpg",
+    "/local-test-image/..%2f..%2fpackage.json",
+    "/local-test-image/..%5C.env.local",
+    "/local-test-image/.env.local",
+    "/local-test-image/README.md"
+  ]) {
+    const response = await server.get(path);
+    assert.equal(response.status, 404, `${path} 应该被拒绝`);
+  }
+});
+
+test("默认预览图路由只依赖素材清单里的默认源", async () => {
+  const response = await server.get("/api/image");
+  // 默认源是外网图片：联网时返回图片，断网或图片失效时必须给出明确的 502，而不是崩溃。
+  if (response.status === 200) {
+    assert.match(response.headers.get("content-type"), /^image\//);
+  } else {
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /默认演示图片当前不可访问/);
+  }
+});
+
+test("素材清单未配置默认图片时给出 404", async () => {
+  const isolated = await startDemoServer({ env: { DEMO_DEFAULT_IMAGE_URL: "https://h.uguu.se/expired.jpg" } });
+  try {
+    const response = await isolated.get("/api/image");
+    assert.equal(response.status, 404);
+    assert.match(await response.text(), /未配置默认演示图片/);
+  } finally {
+    await isolated.stop();
+  }
+});
+
+test("模拟工单审批可以落盘，并且拒绝非法决策", async () => {
+  const workOrderId = `WO-DEMO-TEST-${process.pid}`;
+  const approved = await server.postJson("/api/disposition", { workOrderId, decision: "approve", note: "本地自动化测试记录" });
+  assert.equal(approved.status, 200);
+  const record = await approved.json();
+  assert.equal(record.workOrderId, workOrderId);
+  assert.equal(record.decision, "approve");
+  assert.equal(record.simulationOnly, true);
+  assert.equal(record.dispatchExecuted, false);
+
+  const rejected = await server.postJson("/api/disposition", { workOrderId, decision: "reject", previousDecision: "approve" });
+  assert.equal(rejected.status, 200);
+
+  const lines = readFileSync(join(repoRoot, "data", "workorder-dispositions.jsonl"), "utf8").trim().split(/\r?\n/);
+  const mine = lines.map(line => JSON.parse(line)).filter(item => item.workOrderId === workOrderId);
+  assert.equal(mine.length, 2);
+  assert.deepEqual(mine.map(item => item.decision), ["approve", "reject"]);
+
+  for (const body of [{}, { workOrderId }, { workOrderId, decision: "dispatch" }, { decision: "approve" }]) {
+    const response = await server.postJson("/api/disposition", body);
+    assert.notEqual(response.status, 200, `${JSON.stringify(body)} 不应被接受`);
+    assert.match((await response.json()).error, /无效的工单审批请求/);
+  }
+});
+
+test("审批意见长度被截断到 500 字", async () => {
+  const response = await server.postJson("/api/disposition", { workOrderId: "WO-DEMO-TEST-LONG", decision: "reflight", note: "长".repeat(900) });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).note.length, 500);
+});
+
+test("未知的 POST 路由返回 404，GET 一律回落到演示页（现有行为）", async () => {
+  assert.equal((await server.postJson("/api/no-such-endpoint", {})).status, 404);
+  assert.equal((await server.get("/no-such-path")).status, 200);
+});
