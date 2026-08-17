@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { appendFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { createReadStream, existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -203,6 +203,7 @@ async function recordDisposition(body) {
     simulationOnly: true,
     dispatchExecuted: false
   };
+  await mkdir(new URL("./data/", import.meta.url), { recursive: true });
   await appendFile(new URL("./data/workorder-dispositions.jsonl", import.meta.url), `${JSON.stringify(record)}\n`, "utf8");
   return record;
 }
