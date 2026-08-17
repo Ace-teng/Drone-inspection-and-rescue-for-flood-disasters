@@ -18,6 +18,19 @@ test("首页可以打开且不含任何临时图床直链", async () => {
   assert.match(html, /localSourcePicker/);
 });
 
+test("首页内联脚本可以被解析，且失败信息渲染器在位", async () => {
+  const html = await (await server.get("/")).text();
+  const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+  assert.ok(blocks.length >= 3, `内联脚本块数量异常：${blocks.length}`);
+  blocks.forEach((code, index) => {
+    // new Function 只做语法解析，不执行，因此不需要浏览器环境。
+    assert.doesNotThrow(() => new Function(code), `第 ${index + 1} 段内联脚本语法错误`);
+  });
+  assert.match(html, /function failureText\(/);
+  assert.equal((html.match(/failureText\(/g) || []).length >= 7, true, "仍有错误分支没有走 failureText");
+  assert.match(html, /\.status\{[^}]*white-space:pre-wrap/);
+});
+
 test("首页素材选择器由素材清单生成", async () => {
   const html = await (await server.get("/")).text();
   const catalog = await (await server.get("/api/test-images")).json();
