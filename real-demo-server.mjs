@@ -377,11 +377,11 @@ async function handleUpload(req) {
     return { url: stored.url, objectKey: stored.objectKey, bytes, contentType, driver: storageDriver.name, publicUrl: Boolean(storageDriver.publicUrls) };
   } catch (error) {
     if (error instanceof UploadError) throw error;
-    // 存储侧失败要说清是存储失败，而不是含糊的“上传失败”。
-    throw new UploadError("upload.storage_failed", `【upload.storage_failed】写入对象存储失败：${String(error?.message || error).slice(0, 200)}`, {
-      hint: "请检查对象存储配置（Bucket、Region、权限）与网络连通性；后端终端有完整日志。",
+    // 存储侧失败要说清是存储失败，而不是含糊的“上传失败”；driver 已给出脱敏后的原因和提示。
+    throw new UploadError("upload.storage_failed", `【upload.storage_failed】写入对象存储失败：${String(error?.message || error).slice(0, 300)}`, {
+      hint: error?.hint || "请检查对象存储配置（Bucket、Region、权限）与网络连通性；后端终端有完整日志。",
       responseStatus: 502,
-      diagnostics: { driver: storageDriver.name }
+      diagnostics: { driver: storageDriver.name, ossCode: error?.ossCode ?? null }
     });
   }
 }

@@ -5,7 +5,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "./helpers.mjs";
 
-const sourceFiles = ["real-demo-server.mjs", "lib/agent-gateway.mjs", "lib/object-storage.mjs", "lib/test-images.mjs"];
+const sourceFiles = [
+  "real-demo-server.mjs",
+  "lib/agent-gateway.mjs",
+  "lib/object-storage.mjs",
+  "lib/oss-driver.mjs",
+  "lib/paths.mjs",
+  "lib/test-images.mjs"
+];
 const docFiles = ["README.md", ".env.example", "docs/队员协作与验收说明.md", "docs/上传与对象存储配置.md"];
 
 const source = sourceFiles.map(file => readFileSync(join(repoRoot, file), "utf8")).join("\n");

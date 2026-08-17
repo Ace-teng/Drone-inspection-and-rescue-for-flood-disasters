@@ -178,28 +178,126 @@ test("未配置对象存储时上传返回 503 并列出缺少的变量名", asy
   } finally { await unconfigured.stop(); }
 });
 
-test("配置了 OSS 变量但 driver 未接入时明确说明，而不是假装成功", async () => {
-  const pending = await startDemoServer({
-    env: { STORAGE_DRIVER: "", OSS_REGION: "cn-hangzhou", OSS_BUCKET: "demo-bucket", OSS_ACCESS_KEY_ID: "fake-id-do-not-use", OSS_ACCESS_KEY_SECRET: "fake-secret-do-not-use" }
+test("配置了 OSS 变量时上传可用，且凭据不出现在页面或接口响应里", async () => {
+  const secrets = { OSS_ACCESS_KEY_ID: "TESTIDDONOTUSE0000000", OSS_ACCESS_KEY_SECRET: "test-secret-do-not-use", OSS_BUCKET: "flood-demo-bucket" };
+  const configured = await startDemoServer({
+    env: { STORAGE_DRIVER: "", OSS_REGION: "cn-hangzhou", ...secrets }
   });
   try {
-    const config = await (await pending.get("/api/upload-config")).json();
+    const config = await (await configured.get("/api/upload-config")).json();
     assert.equal(config.driver, "aliyun-oss");
-    assert.equal(config.configured, false);
-    assert.match(config.note, /尚未接入/);
+    assert.equal(config.configured, true);
+    assert.equal(config.publicUrls, true);
+    assert.deepEqual(config.missingEnv, []);
 
-    const response = await upload(jpeg, "image/jpeg", pending);
-    assert.equal(response.status, 503);
-    assert.equal((await response.json()).stage, "upload.storage_unconfigured");
-
-    // 关键安全断言：密钥不能出现在页面或任何接口响应里。
-    const html = await (await pending.get("/")).text();
-    const configRaw = await (await pending.get("/api/upload-config")).text();
-    for (const secret of ["fake-id-do-not-use", "fake-secret-do-not-use", "demo-bucket"]) {
+    // 关键安全断言：凭据与 bucket 名不能出现在页面或任何接口响应里。
+    const html = await (await configured.get("/")).text();
+    const configRaw = await (await configured.get("/api/upload-config")).text();
+    for (const secret of Object.values(secrets)) {
       assert.equal(html.includes(secret), false, `页面泄漏了 ${secret}`);
       assert.equal(configRaw.includes(secret), false, `/api/upload-config 泄漏了 ${secret}`);
     }
-  } finally { await pending.stop(); }
+  } finally { await configured.stop(); }
+});
+
+test("OSS 配置不完整时上传返回 503，不会静默走别的路径", async () => {
+  const partial = await startDemoServer({ env: { STORAGE_DRIVER: "aliyun-oss", OSS_BUCKET: "flood-demo-bucket" } });
+  try {
+    const config = await (await partial.get("/api/upload-config")).json();
+    assert.equal(config.configured, false);
+    assert.deepEqual(config.missingEnv, ["OSS_REGION", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET"]);
+
+    const response = await upload(jpeg, "image/jpeg", partial);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).stage, "upload.storage_unconfigured");
+  } finally { await partial.stop(); }
+});
+
+test("端到端：走真实 ali-oss 客户端上传到本地假 OSS 端点", async () => {
+  const { createServer } = await import("node:http");
+  const received = [];
+  const oss = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", () => {
+      received.push({ method: req.method, url: req.url, acl: req.headers["x-oss-object-acl"], bytes: Buffer.concat(chunks).length });
+      res.writeHead(200, { ETag: '"fake-etag"' });
+      res.end();
+    });
+  });
+  await new Promise(done => oss.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${oss.address().port}`;
+
+  const stack = await startDemoServer({
+    env: {
+      STORAGE_DRIVER: "aliyun-oss",
+      OSS_REGION: "cn-hangzhou",
+      OSS_BUCKET: "flood-demo-bucket",
+      OSS_ACCESS_KEY_ID: "TESTIDDONOTUSE0000000",
+      OSS_ACCESS_KEY_SECRET: "test-secret-do-not-use",
+      OSS_ENDPOINT: endpoint,
+      OSS_CNAME: "1",
+      OSS_PUBLIC_BASE_URL: endpoint
+    }
+  });
+  try {
+    const response = await upload(jpeg, "image/jpeg", stack);
+    const raw = await response.text();
+    assert.equal(response.status, 200, `上传失败：${raw}`);
+    const data = JSON.parse(raw);
+    assert.equal(data.driver, "aliyun-oss");
+    assert.equal(data.publicUrl, true);
+    assert.equal(data.bytes, jpeg.length);
+    assert.equal(data.url, `${endpoint}/${data.objectKey}`);
+
+    assert.equal(received.length, 1, "假 OSS 端点没有收到上传请求");
+    assert.equal(received[0].method, "PUT");
+    assert.equal(received[0].url, `/${data.objectKey}`);
+    assert.equal(received[0].acl, "public-read");
+    assert.equal(received[0].bytes, jpeg.length);
+  } finally {
+    await stack.stop();
+    await new Promise(done => oss.close(done));
+  }
+});
+
+test("对象存储写入失败时返回 502 与 upload.storage_failed", async () => {
+  const { createServer } = await import("node:http");
+  const oss = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(403, { "Content-Type": "application/xml" });
+      res.end('<?xml version="1.0"?><Error><Code>AccessDenied</Code><Message>no right to set object acl</Message><RequestId>mock</RequestId></Error>');
+    });
+  });
+  await new Promise(done => oss.listen(0, "127.0.0.1", done));
+  const endpoint = `http://127.0.0.1:${oss.address().port}`;
+
+  const secret = "test-secret-do-not-use";
+  const stack = await startDemoServer({
+    env: {
+      STORAGE_DRIVER: "aliyun-oss",
+      OSS_REGION: "cn-hangzhou",
+      OSS_BUCKET: "flood-demo-bucket",
+      OSS_ACCESS_KEY_ID: "TESTIDDONOTUSE0000000",
+      OSS_ACCESS_KEY_SECRET: secret,
+      OSS_ENDPOINT: endpoint,
+      OSS_CNAME: "1"
+    }
+  });
+  try {
+    const response = await upload(jpeg, "image/jpeg", stack);
+    assert.equal(response.status, 502);
+    const raw = await response.text();
+    const data = JSON.parse(raw);
+    assert.equal(data.stage, "upload.storage_failed");
+    assert.equal(data.diagnostics.ossCode, "AccessDenied");
+    assert.match(data.hint, /PutObjectAcl|阻止公共访问/);
+    assert.equal(raw.includes(secret), false, "失败响应里泄漏了 AccessKey Secret");
+  } finally {
+    await stack.stop();
+    await new Promise(done => oss.close(done));
+  }
 });
 
 test("图片路由支持 HEAD：图片可访问性检查先发 HEAD", async () => {

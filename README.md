@@ -5,10 +5,11 @@
 前提：安装 Node.js 18+，并连接校园网。
 
 1. 下载本项目。
-2. 将 `.env.example` 复制并改名为 `.env.local`。
-3. 在 `.env.local` 中填入百炼 `BAILIAN_APP_KEY`（不要上传此文件）。若未创建该文件，双击启动器时也可临时粘贴密钥。
-4. 双击 `启动演示.cmd`。
-5. 浏览器打开 `http://127.0.0.1:8789/`。
+2. 在项目目录运行 `npm install`（安装对象存储 SDK `ali-oss`）。
+3. 将 `.env.example` 复制并改名为 `.env.local`。
+4. 在 `.env.local` 中填入百炼 `BAILIAN_APP_KEY`（不要上传此文件）。若未创建该文件，双击启动器时也可临时粘贴密钥。
+5. 双击 `启动演示.cmd`。
+6. 浏览器打开 `http://127.0.0.1:8789/`。
 
 也可在终端运行：`npm run demo`。
 
@@ -34,7 +35,8 @@
 | `DEMO_DEFAULT_IMAGE_URL` | 覆盖默认演示图片直链 |
 | `DEMO_ALLOW_LOCAL_IMAGE_URLS` | 允许把本机地址当作图片直链提交（默认关闭） |
 | `STORAGE_DRIVER` | `aliyun-oss` 或 `local`（本地联调） |
-| `OSS_REGION` / `OSS_BUCKET` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 对象存储配置，只放后端 |
+| `OSS_REGION` / `OSS_BUCKET` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS 配置，只放后端 |
+| `OSS_PREFIX` / `OSS_ENDPOINT` / `OSS_CNAME` / `OSS_PUBLIC_BASE_URL` | 可选：对象前缀、自定义 endpoint、自定义域名、对外基础地址 |
 | `UPLOAD_MAX_BYTES` | 单张图片上限，默认 8 MiB |
 
 ## 本地自动化测试
@@ -69,7 +71,7 @@ npm test
 - `run-demo.mjs`：读取本机密钥并启动
 - `启动演示.cmd`：双击启动
 - `assets/test-images/`：6 张测试图、图片授权，以及素材清单 `test-image-catalog.json`
-- `lib/`：素材清单、平台调用诊断、对象存储三个可单独测试的模块
+- `lib/`：路径、素材清单、平台调用诊断、对象存储与阿里云 OSS driver（都可单独测试）
 - `tests/`：本地自动化测试（Node 内置 test runner，无第三方依赖）
 - `docs/`：队员验收说明与上传配置说明
 
