@@ -12,20 +12,65 @@
 
 也可在终端运行：`npm run demo`。
 
-选择测试图片后，网页会在本地预览该素材；如果 `assets/test-images/test-image-catalog.json` 里为该素材配置了长期有效的公网直链，也会自动填入“公网图片链接”。点击“启动真实巡检研判”即可运行 jfg0、jfg2 和 jfg4 流程。
+## 三种巡检图片来源
 
-平台需要公网可访问的图片直链，本机 `127.0.0.1` 地址读不到，所以真实调用必须填写自有对象存储直链或其他公网直链。可用环境变量 `DEMO_DEFAULT_IMAGE_URL` 覆盖默认演示图片。
+平台在另一台机器上，只能读取**公网可访问的图片直链**；本机 `127.0.0.1` 地址它读不到，所以这类链接会在调用平台之前就被拒绝。
 
-运行本地自动化测试（不需要密钥、不访问百炼平台）：`npm test`。
+1. **上传本机图片**（推荐）：选择 JPG/PNG → 点击“上传并作为巡检图片”→ 后端存入对象存储并把返回的直链填入“公网图片链接”。需要先配置对象存储，见 [docs/上传与对象存储配置.md](docs/上传与对象存储配置.md)。
+2. **自带测试素材**：`assets/test-images/` 的 6 张图，选中即可在本页预览。清单 `assets/test-images/test-image-catalog.json` 里配置了长期直链的素材会自动填入链接；没有配置的只能预览，需要真实调用时请改用上传。
+3. **自己填公网直链**：直接把任何公网可访问的 JPG/PNG 直链粘进“公网图片链接”。
 
-## 保留内容
+> 不要使用临时图床（uguu.se、catbox 等）。这类直链几小时到几天就会过期，过期后平台读图静默失败。服务启动时会拒绝并告警这类链接。
 
-- `real-demo-server.mjs`：网页与百炼真实调用
+## 环境变量
+
+真实取值只写在不提交的 `.env.local`；`.env.example` 只列变量名和说明。密钥绝不能进入 HTML、前端 JS 或 Git。
+
+| 变量 | 用途 |
+| --- | --- |
+| `BAILIAN_APP_KEY` | 智能体平台密钥（必填） |
+| `PORT` | 演示端口，默认 8789 |
+| `BAILIAN_API_BASE` | 覆盖智能体网关地址（本地测试用假网关时使用） |
+| `DEMO_DEFAULT_IMAGE_URL` | 覆盖默认演示图片直链 |
+| `DEMO_ALLOW_LOCAL_IMAGE_URLS` | 允许把本机地址当作图片直链提交（默认关闭） |
+| `STORAGE_DRIVER` | `aliyun-oss` 或 `local`（本地联调） |
+| `OSS_REGION` / `OSS_BUCKET` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 对象存储配置，只放后端 |
+| `UPLOAD_MAX_BYTES` | 单张图片上限，默认 8 MiB |
+
+## 本地自动化测试
+
+```
+npm test
+```
+
+不需要密钥，不访问智能体平台，不访问外网（平台调用由内置假网关模拟）。覆盖素材清单、本地预览与路径穿越、上传校验与各类错误分支、模拟工单审批落盘，以及平台失败的分阶段诊断。
+
+## 排查：调用失败时看 stage
+
+失败信息统一带 `【stage】`、排查提示和非敏感诊断信息。常见 stage：
+
+| stage | 含义 | 该找谁 |
+| --- | --- | --- |
+| `config.missing_key` | 本机没配 `BAILIAN_APP_KEY` | 自己补 `.env.local` |
+| `input.invalid` | 缺任务描述/图片链接/会话号等 | 自己修输入 |
+| `image.rejected` | 图片链接不可用（如本机地址） | 改用上传或公网直链 |
+| `image.unreachable` | 图片链接返回 4xx/5xx（常见于过期图床） | 换图片 |
+| `createSession.network` / `.timeout` | 连不上平台 | 检查校园网 |
+| `createSession.rejected` | 平台拒绝建会话 | 看提示；若标注平台故障则等平台恢复 |
+| `run.rejected` | 平台拒绝执行 | 看平台给出的原因 |
+| `run.empty` | 平台返回成功但没有文本输出 | 先确认图片能无登录打开，再查工作流输出节点 |
+| `upload.*` | 上传被本地校验或存储拒绝 | 按提示修文件或配置 |
+
+被判定为平台侧故障时，信息里会明确写“平台侧故障（external blocker），本地代码与本机配置无需修改”。
+
+## 目录
+
+- `real-demo-server.mjs`：网页与平台真实调用
 - `run-demo.mjs`：读取本机密钥并启动
 - `启动演示.cmd`：双击启动
 - `assets/test-images/`：6 张测试图、图片授权，以及素材清单 `test-image-catalog.json`
-- `lib/`：素材清单读取等可单独测试的模块
+- `lib/`：素材清单、平台调用诊断、对象存储三个可单独测试的模块
 - `tests/`：本地自动化测试（Node 内置 test runner，无第三方依赖）
-- `docs/`：队员验收说明
+- `docs/`：队员验收说明与上传配置说明
 
 本系统只生成模拟研判与模拟工单，不执行真实救援派遣。
