@@ -1,0 +1,48 @@
+{
+  "maintenanceNote": "本文件是演示素材清单与公网直链的唯一来源。real-demo-server.mjs 启动时读取本文件生成素材选择器与 /api/test-images，请不要在源码或文档中重复维护同一份 URL 映射。",
+  "publicUrlPolicy": "只允许填写自己可控、长期有效的对象存储直链（例如本项目的阿里云 OSS）。禁止填写临时图床（uguu.se 等）直链：它们会在数小时到数天内过期，导致平台读图失败，启动时会被拒绝并告警。publicUrl 留空表示该素材没有长期直链，只能在本页预览；需要真实调用时请填写自有对象存储直链。",
+  "defaultSource": {
+    "id": "default-flood-aerial",
+    "label": "默认洪涝航拍图（第三方公开图片）",
+    "publicUrl": "https://xiangyu-macau.oss-cn-hongkong.aliyuncs.com/app/szb/pc/pic/202006/09/8ede59e2-00e5-4e5d-b62c-1b945ec3e477.jpg.1",
+    "publicUrlNote": "第三方公开图片，不是本项目控制的资源，可能随时失效或变更。可用环境变量 DEMO_DEFAULT_IMAGE_URL 覆盖；配置对象存储后建议改用本目录自带素材。"
+  },
+  "images": [
+    {
+      "file": "01_bridge_debris_high.jpg",
+      "label": "01｜桥梁杂物堆积（高风险）",
+      "scenario": "桥梁漂浮物/杂物堆积",
+      "publicUrl": null
+    },
+    {
+      "file": "02_bridge_debris_medium.jpg",
+      "label": "02｜桥梁杂物堆积（中风险）",
+      "scenario": "低位桥梁附近漂浮物",
+      "publicUrl": null
+    },
+    {
+      "file": "03_flooded_road_high.jpg",
+      "label": "03｜道路积水",
+      "scenario": "道路被洪水淹没",
+      "publicUrl": null
+    },
+    {
+      "file": "04_blurred_reflight_check.jpg",
+      "label": "04｜低清晰度，建议复飞",
+      "scenario": "低清晰度桥梁图",
+      "publicUrl": null
+    },
+    {
+      "file": "05_normal_rural_road.jpg",
+      "label": "05｜正常乡村道路",
+      "scenario": "正常乡村道路",
+      "publicUrl": null
+    },
+    {
+      "file": "06_normal_bridge.jpg",
+      "label": "06｜正常桥梁",
+      "scenario": "正常桥梁",
+      "publicUrl": null
+    }
+  ]
+}
