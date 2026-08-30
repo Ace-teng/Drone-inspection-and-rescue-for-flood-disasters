@@ -1,5 +1,13 @@
 # 汛巡智眼｜洪涝灾害无人机巡检救援
 
+## 在线体验版
+
+仓库发布后可通过 GitHub Pages 访问在线体验页：
+
+`https://ace-teng.github.io/Drone-inspection-and-rescue-for-flood-disasters/`
+
+在线版复用本项目真实演示页面和完整交互闭环，使用预置巡检样例，因此不暴露 `BAILIAN_APP_KEY`、对象存储凭据或校园网内接口。真实智能体调用、上传对象存储与现场答辩，请按以下本地启动说明进行。
+
 ## 启动（Windows）
 
 前提：安装 Node.js 18+，并连接校园网。
