@@ -6,6 +6,7 @@
   let busy = false, hasOrder = false, decision = '', orderId = '', assessmentReady = false;
   let reviewNeedsAssessment = false;
   let observationState = 'idle';
+  let operation = '', operationError = '';
   let sourceRevision = 0, assessmentRevision = -1;
   const titles = {approve:'审批通过（模拟）',reject:'工单已驳回',reflight:'已退回复飞核验'};
   const text = (tag, value, className) => { const el = document.createElement(tag); el.textContent = value; if(className)el.className=className; return el; };
@@ -65,23 +66,38 @@
   };
   const selectEvidence=index=>{
     selectedEvidence=index;renderLinkedEvidence();evidenceAnnouncement.textContent='已展示事件 '+(index+1)+'：'+(linkedEvents[index].risk_type||'待核验风险')+'的影像证据。';
+    sync();
     // 窄屏影像与卡片上下排列，选中后将证据带入视野；桌面保留当前位置。
     if(window.matchMedia('(max-width:1150px)').matches)evidencePanel.scrollIntoView({block:'nearest',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches?'instant':'smooth'});
   };
   const displayAssessment = () => {
     if (!assessmentReady) return;
-    let data; try {data=JSON.parse($('#output').textContent);} catch {metrics.replaceChildren();linkedEvents=[];selectedEvidence=null;renderLinkedEvidence();return;}
+    let data; try {data=JSON.parse($('#output').textContent);if(!data||!Array.isArray(data.events))throw Error('缺少事件列表');} catch {
+      metrics.replaceChildren();linkedEvents=[];selectedEvidence=null;renderLinkedEvidence();
+      assessmentReady=false;observationState='error';result.style.display='none';review.style.display='none';
+      $('#status').textContent='研判返回格式异常，未形成可用的结构化事件。请重新研判；原始返回：'+$('#output').textContent;
+      return;
+    }
     const events = Array.isArray(data.events)?data.events:[];
     linkedEvents=events;if(selectedEvidence!==null&&selectedEvidence>=events.length)selectedEvidence=null;
     const levels=events.map(e=>String(e.risk_level||'待核验'));
     const highest=levels.find(l=>l.includes('高'))||levels.find(l=>l.includes('中'))||levels.find(l=>l.includes('低'))||(events.length?'待核验':'未发现');
-    metrics.replaceChildren(...[['候选风险事件',events.length+' 项'],['最高风险等级',highest],['当前处置状态',hasOrder?(titles[decision]||'待人工审批'):'待人工复核']].map(([label,value])=>{const cell=document.createElement('div');cell.append(text('span',label),text('strong',value));return cell;}));
+    const ring=document.createElement('div');ring.className='risk-ring';
+    ring.style.setProperty('--risk-color',highest.includes('高')?'var(--high)':highest.includes('中')?'var(--medium)':highest.includes('低')||!events.length?'var(--low)':'#93aeb9');
+    ring.append(text('strong',highest),text('small','最高风险等级'));
+    const facts=document.createElement('div');facts.className='risk-facts';
+    for(const [label,value] of [['风险事件',events.length+' 项'],['处置状态',hasOrder?(titles[decision]||'待人工审批'):'待人工复核']]){const row=document.createElement('div');row.append(text('span',label),text('strong',value));facts.append(row);}
+    facts.append(text('p',online?'数据来源：预置案例':'数据来源：本次平台返回'));metrics.replaceChildren(ring,facts);
     $('#events').replaceChildren(...events.map((event,index)=>{
       const card=document.createElement('section');card.className='event risk-event';
       card.dataset.risk=String(event.risk_level||'').includes('高')?'high':String(event.risk_level||'').includes('中')?'medium':String(event.risk_level||'').includes('低')?'low':'unknown';
       const heading=document.createElement('div');heading.className='risk-heading';heading.append(text('b','事件 '+String(index+1).padStart(2,'0')+'｜'+(event.risk_type||'待核验风险')),text('span',event.risk_level||'待核验','level'));card.append(heading,text('p','位置：'+(event.location||'未标注'),'risk-location'));
       // 摘要直接使用原始证据，视觉上限制行数；完整内容始终保留在联动证据区。
       card.append(text('p',event.visual_evidence||'待人工复核','risk-preview'));
+      const actions=document.createElement('ul');actions.className='risk-actions';
+      (Array.isArray(event.recommended_actions)?event.recommended_actions:[]).forEach(action=>actions.append(text('li',String(action))));card.append(actions);
+      const confidence=Number(event.confidence);
+      if(event.confidence!==null&&event.confidence!==undefined&&event.confidence!==''&&Number.isFinite(confidence)&&confidence>=0&&confidence<=1)card.append(text('p','模型置信度 '+Math.round(confidence*100)+'% · 非实际准确率','risk-location'));
       const select=text('button','查看影像证据 ↗','evidence-select');select.type='button';select.setAttribute('aria-controls','linkedEvidence');select.setAttribute('aria-label','查看事件 '+(index+1)+' '+(event.risk_type||'待核验风险')+'的影像证据');select.onclick=()=>selectEvidence(index);card.append(select);
       card.addEventListener('click',event=>{if(!event.target.closest('button')&&!window.getSelection()?.toString())selectEvidence(index);});return card;
     }));
@@ -94,7 +110,7 @@
 
   const decisionPanel=document.createElement('section');decisionPanel.className='decision-panel';
   decisionPanel.innerHTML='<div class="decision-tabs" role="tablist" aria-label="复核与工单"><button type="button" id="reviewTab" role="tab" aria-controls="reviewPane" aria-selected="true">人工复核</button><button type="button" id="orderTab" role="tab" aria-controls="orderPane" aria-selected="false">模拟工单 <span id="orderCount">0</span></button></div><div id="reviewPane" role="tabpanel" aria-labelledby="reviewTab"></div><div id="orderPane" role="tabpanel" aria-labelledby="orderTab"></div>';
-  result.after(decisionPanel);$('#reviewPane').append(review);$('#orderPane').append(workorder,final);
+  document.querySelector('.analysis-workspace').append(decisionPanel);$('#reviewPane').append(review);$('#orderPane').append(workorder,final);
   const emptyOrder=text('p','尚未生成工单，请先完成人工复核。','order-empty');$('#orderPane').prepend(emptyOrder);
   const audit=document.createElement('ol');audit.className='disposition-audit';audit.setAttribute('aria-label','工单处置记录');final.append(audit);
   const records=[];
@@ -115,29 +131,36 @@
     $('#reviewText').readOnly=busy||hasOrder;
     $('#task').disabled=busy;$('#localSourcePicker').disabled=busy;$('#url').disabled=busy;$('#uploadFile').disabled=busy;
     $('#sampleSourceTab').disabled=busy;$('#uploadSourceTab').disabled=busy;
-    if(!busy)document.querySelectorAll('.step').forEach((step,i)=>{step.classList.toggle('active',i<(decision?6:hasOrder?5:assessmentReady?4:0));step.setAttribute('aria-current',(!decision&&i===(hasOrder?5:assessmentReady?3:-1))?'step':'false');});
+    window.inspectionUI?.update({busy,assessmentReady,hasOrder,decision,observationState,events:linkedEvents,selectedEvidence,operation,operationError});
   };
   const reset = () => {
     linkedEvents=[];selectedEvidence=null;evidenceAnnouncement.textContent='';renderLinkedEvidence();
-    assessmentReady=false;hasOrder=false;decision='';orderId='';reviewNeedsAssessment=false;observationState='idle';records.length=0;renderAudit();
+    assessmentReady=false;hasOrder=false;decision='';orderId='';reviewNeedsAssessment=false;observationState='idle';operation='';operationError='';records.length=0;renderAudit();
     [result,review,workorder,final,$('#reviewReplyPanel'),$('#finalFeedback')].forEach(el=>el.style.display='none');
     ['output','summary','events','reviewOutput','workorderCard','workorderOutput','finalFeedback'].forEach(id=>$('#'+id).replaceChildren());
     $('#reviewText').value='';$('#finalNote').value='';metrics.replaceChildren();selectTab('review');sync();
   };
   const invalidate = () => {sourceRevision++;if(assessmentReady||hasOrder||observationState!=='idle'){reset();$('#status').textContent='任务输入已改变，请重新启动研判。';}};
   $('#localSourcePicker').addEventListener('change',invalidate);$('#uploadFile').addEventListener('change',invalidate);$('#url').addEventListener('input',invalidate);$('#task').addEventListener('input',invalidate);
+  const originalUpload=$('#uploadBtn').onclick;
+  $('#uploadBtn').onclick=async event=>{
+    if(busy)return;
+    const previousUrl=$('#url').value;busy=true;operation='upload';operationError='';sync();
+    try{await originalUpload(event);}finally{busy=false;if($('#url').value!==previousUrl)invalidate();sync();}
+  };
   const originalRun=$('#run').onclick;
   $('#run').onclick=async event=>{
     if(busy)return;
-    reset();busy=true;observationState='running';assessmentRevision=sourceRevision;sync();
+    if(online&&$('#inspectionPreview').src.startsWith('blob:')){reset();observationState='error';$('#status').textContent='当前上传图片仅供预览。预置体验只能研判已有样例；请选择下方缩略图，或切换真实调用模式分析自己的图片。';sync();return;}
+    reset();busy=true;observationState='running';operation='mission';assessmentRevision=sourceRevision;sync();
     try{await originalRun(event);}
     catch(error){busy=false;observationState='error';$('#status').textContent='研判未完成：'+error.message;sync();}
     finally{if(!online){busy=false;assessmentReady=result.style.display==='block';observationState=assessmentReady?'completed':'error';displayAssessment();sync();}}
   };
   const originalConfirm=$('#confirm').onclick;
-  $('#confirm').onclick=async event=>{if(busy||hasOrder||!assessmentReady||reviewNeedsAssessment||assessmentRevision!==sourceRevision)return;busy=true;sync();try{await originalConfirm(event);}finally{if(!online){busy=false;readOrder();sync();}}};
+  $('#confirm').onclick=async event=>{if(busy||hasOrder||!assessmentReady||reviewNeedsAssessment||assessmentRevision!==sourceRevision)return;busy=true;operation='workorder';operationError='';sync();try{await originalConfirm(event);}finally{if(!online){busy=false;readOrder();if(!hasOrder)operationError='workorder';sync();}}};
   const originalModify=$('#modify').onclick;
-  $('#modify').onclick=async event=>{if(busy||hasOrder||!assessmentReady)return;if(!$('#reviewText').value.trim()){$('#status').textContent='请先填写复核意见。';return;}reviewNeedsAssessment=!online;busy=true;sync();try{await originalModify(event);}finally{if(!online){busy=false;sync();}}};
+  $('#modify').onclick=async event=>{if(busy||hasOrder||!assessmentReady)return;if(!$('#reviewText').value.trim()){$('#status').textContent='请先填写复核意见。';return;}reviewNeedsAssessment=!online;busy=true;operation='review';operationError='';sync();try{await originalModify(event);}finally{if(!online){busy=false;if($('#status').textContent.includes('失败'))operationError='review';sync();}}};
   const originalCancel=$('#cancel').onclick;
   $('#cancel').onclick=event=>{if(busy||hasOrder||!assessmentReady)return;originalCancel(event);sync();};
   // 在线体验原函数通过定时器结束；监听显示状态与返回内容接回状态机。
@@ -160,7 +183,7 @@
   new MutationObserver(sync).observe(final,{subtree:true,attributes:true,attributeFilter:['disabled']});
   const approval = async next => {
     if(busy||!hasOrder||!orderId||(next!=='revoke'&&decision)||(next==='revoke'&&!decision))return;
-    busy=true;sync();const feedback=$('#finalFeedback');feedback.style.display='block';feedback.textContent='正在记录人工决定…';
+    busy=true;operation='approval';operationError='';sync();const feedback=$('#finalFeedback');feedback.style.display='block';feedback.textContent='正在记录人工决定…';
     try{
       let data={decidedAt:new Date().toLocaleString('zh-CN'),note:$('#finalNote').value.trim()};
       if(!online){const response=await fetch('/api/disposition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workOrderId:orderId,decision:next,previousDecision:decision,note:$('#finalNote').value.trim()})});data=await response.json();if(!response.ok)throw Error(data.error||'审批记录失败');}
@@ -175,7 +198,7 @@
       // 同步工单卡片中旧的静态“待审批”说明。
       $('#workorderCard').querySelectorAll('p').forEach(p=>{if(p.textContent.startsWith('审批状态：'))p.textContent='审批状态：'+label+'；系统未执行真实派遣。';});
       displayAssessment();
-    }catch(error){feedback.textContent='审批未完成：'+error.message;}finally{busy=false;sync();}
+    }catch(error){operationError='approval';feedback.textContent='审批未完成：'+error.message;}finally{busy=false;sync();}
   };
   $('#approveSim').onclick=()=>approval('approve');$('#rejectSim').onclick=()=>approval('reject');$('#reflightSim').onclick=()=>approval('reflight');
   for(const [id,label] of [['reviewText','复核意见'],['finalNote','审批意见']]){

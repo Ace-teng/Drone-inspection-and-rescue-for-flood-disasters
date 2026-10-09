@@ -1,139 +1,62 @@
-/* 展示层渐进增强。保留既有元素、事件处理器和后端请求。 */
+/* Shared GIS presentation shell; existing business controls and handlers are retained. */
 (() => {
-  const $ = selector => document.querySelector(selector);
-  const taskCard = $('.grid > .card:first-child');
-  const analysisCard = $('.grid > .card:nth-child(2)');
-  const preview = $('#inspectionPreview');
-  if (!taskCard || !analysisCard || !preview) return;
-
-  $('.brand').insertAdjacentHTML('afterbegin', '<span class="brand-mark" aria-hidden="true"><span></span></span>');
-  $('.brand').insertAdjacentHTML('beforeend', '<span class="brand-subtitle">洪涝巡检 · 辅助决策</span>');
-  const hero = $('.hero');
-  const heroText = document.createElement('div');
-  while (hero.firstChild) heroText.append(hero.firstChild);
-  heroText.insertAdjacentHTML('afterbegin', '<div class="workspace-eyebrow">INSPECTION WORKSPACE / 巡检工作台</div>');
-  hero.append(heroText);
-  const mode = document.createElement('span');
-  mode.className = 'workspace-mode';
-  mode.textContent = '人工复核 · 模拟处置';
-  hero.append(mode);
-  $('.hero h1').textContent = '洪涝灾害巡检工作台';
-  heroText.querySelector('p').textContent='影像识别 / 风险研判 / 人工复核 / 模拟工单';
-  const brandLine=document.createElement('p');
-  brandLine.className='brand-line';brandLine.textContent='看见现场，让每一次研判有据可循。';
-  heroText.insertBefore(brandLine,heroText.querySelector('p'));
-  hero.querySelector('.workspace-eyebrow').textContent='汛巡智眼 / FLOOD INSPECTION';
-  mode.innerHTML='<span class="mode-dot" aria-hidden="true"></span><div>人机协同研判<small>人工复核 · 模拟处置</small></div>';
-  taskCard.insertAdjacentHTML('afterbegin', '<div class="panel-kicker">MISSION / 任务配置</div>');
-
-  // 将影像移至主工作区，保留原节点，因此素材切换、上传预览仍然有效。
-  const imageLabel = preview.previousElementSibling;
-  if (imageLabel?.classList.contains('label')) imageLabel.remove();
-  const workspace = document.createElement('section');
-  workspace.className = 'image-workspace';
-  workspace.setAttribute('aria-label', '巡检影像工作区');
-  workspace.innerHTML = '<div class="image-toolbar"><div><span class="section-index">01 / VISUAL EVIDENCE</span><h2>巡检影像</h2><p>现场证据 · 完整画幅</p></div><button type="button" class="secondary" id="expandImage">放大影像 ↗</button></div><div class="image-stage"><div class="image-failure" role="status">影像暂未加载<br>请选择左侧测试素材，或上传巡检图片</div></div><div class="image-caption"><span id="imageSourceCaption"></span><span>原图比例 · 完整显示</span></div><div class="image-principle"><span class="principle-dot" aria-hidden="true"></span>判断依据来自当前影像，风险需人工核验</div>';
-  workspace.querySelector('.image-stage').prepend(preview);
-  analysisCard.prepend(workspace);
-  const stage = workspace.querySelector('.image-stage');
-  const caption = $('#imageSourceCaption');
-  const picker = $('#localSourcePicker');
-  const file = $('#uploadFile');
-  const sourceCaption = () => {
-    if (preview.src.startsWith('blob:') && file.files?.[0]) {
-      caption.textContent = '本机图片 / ' + file.files[0].name;
-    } else {
-      caption.textContent = '当前素材 / ' + (picker.selectedOptions[0]?.textContent || '巡检影像');
-    }
-  };
-  preview.addEventListener('load', () => { stage.classList.remove('image-unavailable'); sourceCaption(); });
-  preview.addEventListener('error', () => stage.classList.add('image-unavailable'));
-  if (preview.complete && !preview.naturalWidth) stage.classList.add('image-unavailable');
-  sourceCaption();
-  picker.addEventListener('change', sourceCaption);
-
-  // 将技术说明和图片直链折叠，常用输入仍然直接可见。
-  const details = document.createElement('details');
-  details.className = 'source-details';
-  details.innerHTML = '<summary>图片链接与接入说明</summary>';
-  const url = $('#url');
-  const urlLabel = url.previousElementSibling;
-  details.append(urlLabel, url, $('#localSourceHint'), $('#uploadHint'));
-  const run = $('#run');
-  run.insertAdjacentHTML('beforeend','<span class="run-arrow" aria-hidden="true">↗</span>');
-  taskCard.insertBefore(details, run.nextElementSibling.nextElementSibling);
-  const sourceSwitch=document.createElement('div');sourceSwitch.className='source-switch';
-  sourceSwitch.innerHTML='<div class="source-tabs" role="tablist" aria-label="巡检影像来源"><button type="button" id="sampleSourceTab" role="tab" aria-selected="true" aria-controls="sampleSourcePane">样例影像</button><button type="button" id="uploadSourceTab" role="tab" aria-selected="false" aria-controls="uploadSourcePane">上传图片</button></div><div id="sampleSourcePane" role="tabpanel" aria-labelledby="sampleSourceTab"></div><div id="uploadSourcePane" role="tabpanel" aria-labelledby="uploadSourceTab" hidden></div>';
-  const sampleLabel=picker.previousElementSibling;
-  sampleLabel.before(sourceSwitch);
-  $('#sampleSourcePane').append(sampleLabel,picker);
-  $('#uploadSourcePane').append(file.previousElementSibling,file,$('#uploadBtn'));
-  const selectSource=name=>{
-    for(const key of ['sample','upload']){$('#'+key+'SourcePane').hidden=name!==key;$('#'+key+'SourceTab').setAttribute('aria-selected',String(name===key));}
-  };
+  const $ = s => document.querySelector(s);
+  const taskCard=$('.grid>.card:first-child'), analysis=$('.grid>.card:nth-child(2)');
+  const preview=$('#inspectionPreview'), picker=$('#localSourcePicker'), file=$('#uploadFile');
+  if(!taskCard||!analysis||!preview)return;
+  const online=document.title.includes('在线体验');
+  const text=(el,value)=>{if(el.textContent!==value)el.textContent=value;};
+  const make=(tag,cls,html='')=>{const el=document.createElement(tag);el.className=cls;el.innerHTML=html;return el;};
+  const paths={workspace:'M4 7h16v14H4z M9 7V4h6v3 M8 12h8 M8 16h5',task:'M5 4h14v17H5z M9 3v3 M15 3v3 M8 11h8 M8 16h5',map:'m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z M9 3v15 M15 6v15',risk:'m12 3 10 18H2z M12 9v5 M12 17v1',image:'M3 4h18v16H3z m0 12 5-5 5 5 3-3 5 5 M15 8h.01',check:'m5 12 4 4L20 5',arrow:'M5 12h14 m-5-5 5 5-5 5',layers:'m12 3 10 6-10 6L2 9z M2 13l10 6 10-6 M2 17l10 6 10-6',expand:'M9 3H3v6 M15 3h6v6 M3 15v6h6 M21 15v6h-6',pin:'M18 9c0 5-6 12-6 12S6 14 6 9a6 6 0 1 1 12 0z M12 7v4 M10 9h4'};
+  const icon=name=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]}"/></svg>`;
+  document.body.classList.add('gis-workspace');
+  $('.brand').innerHTML='<span class="brand-mark" aria-hidden="true"><span></span></span><span>汛巡智眼<small>FLOOD INTELLIGENCE</small></span>';
+  const sidebar=make('aside','sidebar');sidebar.append($('.brand'));
+  const nav=make('nav','side-nav',[
+    ['workspace','巡检工作台','workspaceTop'],['task','任务配置','taskPanel'],['map','区域概览','basinOverview'],['risk','风险研判','riskColumn'],['image','巡检影像','imageWorkspace'],['check','处置流程','executionPanel']
+  ].map(([glyph,label,id],i)=>`<a href="#${id}" aria-label="${label}" title="${label}"${i===0?' aria-current="page"':''}>${icon(glyph)}<span>${label}</span></a>`).join(''));
+  nav.setAttribute('aria-label','工作台导航');sidebar.append(nav,make('div','sidebar-bottom',`<span class="system-dot"></span><div>${online?'预置案例体验':'真实调用模式'}<small>人工复核 · 模拟处置</small></div><span class="version-label">LOCAL</span>`));document.body.prepend(sidebar);
+  $('.bar').id='workspaceTop';$('.bar').prepend(make('div','topbar-title','<span>洪涝巡检</span><i>/</i><strong>智能研判工作台</strong>'));
+  if(['127.0.0.1','localhost'].includes(location.hostname)){const link=make('a','mode-link',online?'切换真实调用 ↗':'预置案例演示 ↗');link.href=online?'/':'/experience/';$('.bar').append(link);}
+  const hero=$('.hero');hero.id='basinOverview';hero.setAttribute('aria-label','区域概览，非实时地图');
+  hero.innerHTML=`<div class="basin-grid" aria-hidden="true"></div><div class="basin-caption"><span class="eyebrow">REGIONAL OVERVIEW / 区域概览</span><h1>洪涝灾害巡检工作台</h1><p>看见现场，让每一次研判有据可循。</p><div class="basin-stats"><div><strong id="basinSourceCount">—</strong><span>可用样例影像</span></div><div><strong id="basinEventCount">—</strong><span>本次风险事件</span></div><div><strong id="basinPhase">待启动</strong><span>${online?'预置案例 · 本次任务':'当前任务状态'}</span></div></div></div><div class="map-legend"><span><i class="low"></i>低风险</span><span><i class="medium"></i>中风险</span><span><i class="high"></i>高风险</span></div><div class="map-compass" aria-hidden="true">N<span>↑</span></div><span class="map-disclaimer">${icon('layers')} 区域示意 · 非实时地图 · 无定位数据</span>`;
+  const mapTools=make('div','terrain-tools','<button type="button" aria-label="Zoom in">+</button><button type="button" aria-label="Zoom out">&minus;</button><button type="button" aria-label="Reset map">&#8634;</button>');hero.append(mapTools);
+  let terrainZoom=1;mapTools.querySelectorAll('button').forEach((button,index)=>button.onclick=()=>{terrainZoom=index===2?1:Math.max(1,Math.min(2,terrainZoom+(index===0?.2:-.2)));hero.style.backgroundSize=terrainZoom===1?'cover':`${terrainZoom*100}% auto`;});
+  taskCard.id='taskPanel';taskCard.classList.add('task-panel');taskCard.querySelector('h2').remove();
+  if(preview.previousElementSibling?.classList.contains('label'))preview.previousElementSibling.remove();
+  const image=make('section','image-workspace',`<div class="image-toolbar"><div><span class="section-index">VISUAL EVIDENCE</span><h2>巡检影像</h2></div><button type="button" class="secondary" id="expandImage">${icon('expand')}<span>查看原图</span></button></div><div class="image-stage"><div class="image-failure" role="status">${icon('image')}<strong>影像暂不可用</strong><span>请重新选择样例，或检查图片链接。</span></div><span class="image-frame-label">完整画幅 · 原始证据</span><span id="imageDimensions" class="image-dimensions">加载中</span></div><div class="image-caption"><span id="imageSourceCaption"></span><span id="imageNumber"></span></div><div class="thumbnail-strip" role="group" aria-label="切换预置巡检影像"></div><div class="image-principle"><span class="system-dot"></span><span>${online?'预置样例影像 · 演示研判，非实时监测':'现场影像 · 模型结论需人工核验'}</span></div>`);
+  image.id='imageWorkspace';image.querySelector('.image-stage').prepend(preview);analysis.prepend(image);
+  const sourceDetails=make('details','source-details','<summary>公网图片链接与接入说明</summary>');sourceDetails.append($('#url').previousElementSibling,$('#url'),$('#localSourceHint'));
+  const sourceSwitch=make('div','source-switch','<div class="source-tabs" role="tablist" aria-label="巡检影像来源"><button type="button" id="sampleSourceTab" role="tab" aria-selected="true" aria-controls="sampleSourcePane">样例影像</button><button type="button" id="uploadSourceTab" role="tab" aria-selected="false" aria-controls="uploadSourcePane">上传图片</button></div><div id="sampleSourcePane" role="tabpanel" aria-labelledby="sampleSourceTab"></div><div id="uploadSourcePane" role="tabpanel" aria-labelledby="uploadSourceTab" hidden></div>');
+  const sampleLabel=picker.previousElementSibling;sampleLabel.before(sourceSwitch);$('#sampleSourcePane').append(sampleLabel,picker);$('#uploadSourcePane').append(file.previousElementSibling,file,$('#uploadBtn'),$('#uploadHint'));
+  taskCard.append(sourceDetails);$('#run').insertAdjacentHTML('beforeend',icon('arrow'));
+  const form=make('div','task-form');form.id='taskConfigPane';form.setAttribute('role','tabpanel');form.setAttribute('aria-labelledby','taskConfigTab');while(taskCard.firstChild)form.append(taskCard.firstChild);
+  taskCard.append(make('div','panel-heading','<span class="section-index">MISSION CONTROL</span><h2>巡检任务</h2>'),make('div','task-tabs','<button id="taskConfigTab" type="button" role="tab" aria-controls="taskConfigPane" aria-selected="true">任务配置</button><button id="taskDetailTab" type="button" role="tab" aria-controls="taskDetailPane" aria-selected="false">任务详情</button>'),form);
+  $('.task-tabs').setAttribute('role','tablist');$('.task-tabs').setAttribute('aria-label','任务信息');
+  const detail=make('section','task-detail','<dl><dt>巡检区域</dt><dd id="detailRegion"></dd><dt>当前影像</dt><dd id="detailImage"></dd><dt>当前状态</dt><dd id="detailState">待启动</dd><dt>巡检描述</dt><dd id="detailTask"></dd><dt>数据来源</dt><dd id="detailSource"></dd></dl><button id="backToConfig" type="button" class="secondary">返回任务配置</button>');detail.id='taskDetailPane';detail.hidden=true;detail.setAttribute('role','tabpanel');detail.setAttribute('aria-labelledby','taskDetailTab');taskCard.append(detail);
+  const selectTask=mode=>{form.hidden=mode!=='config';detail.hidden=mode!=='detail';$('#taskConfigTab').setAttribute('aria-selected',String(mode==='config'));$('#taskDetailTab').setAttribute('aria-selected',String(mode==='detail'));};
+  $('#taskConfigTab').onclick=()=>selectTask('config');$('#taskDetailTab').onclick=()=>selectTask('detail');$('#backToConfig').onclick=()=>selectTask('config');
+  const selectSource=mode=>{for(const key of ['sample','upload']){$('#'+key+'SourcePane').hidden=mode!==key;$('#'+key+'SourceTab').setAttribute('aria-selected',String(mode===key));}};
   $('#sampleSourceTab').onclick=()=>selectSource('sample');$('#uploadSourceTab').onclick=()=>selectSource('upload');
-  for(const [index,key] of ['sample','upload'].entries())$('#'+key+'SourceTab').addEventListener('keydown',event=>{
-    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
-    event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;
-    const target=next?'upload':'sample';selectSource(target);$('#'+target+'SourceTab').focus();
-  });
-  // 原有在线体验脚本使用 run.nextElementSibling，故保留该提示节点位置。
-  $('#status').setAttribute('role', 'status');
-  $('#status').setAttribute('aria-live', 'polite');
-  $('.steps').setAttribute('aria-label', '巡检处置流程');
-  analysisCard.querySelector(':scope > h2').textContent = '研判与处置流程';
-  const execution=document.createElement('section');execution.className='execution-panel';execution.setAttribute('aria-label','执行进度');
-  execution.append(analysisCard.querySelector(':scope > h2'),$('.steps'),$('#status'));
-  analysisCard.prepend(execution);
-  analysisCard.classList.add('analysis-workspace');
-  // 补齐现有表单的标签关联。
-  let labelIndex = 0;
-  document.querySelectorAll('label.label').forEach(label => {
-    const control = label.nextElementSibling;
-    if (!control?.matches('input,select,textarea')) return;
-    if (!control.id) control.id = 'workspace-field-' + (++labelIndex);
-    label.htmlFor = control.id;
-  });
-
-  const dialog = document.createElement('dialog');
-  dialog.className = 'image-dialog';
-  dialog.setAttribute('aria-labelledby', 'imageDialogTitle');
-  dialog.innerHTML = '<div class="dialog-toolbar"><strong id="imageDialogTitle">巡检影像 · 原图查看</strong><button type="button" class="secondary">关闭</button></div><img alt="放大的巡检影像">';
-  document.body.append(dialog);
-  $('#expandImage').addEventListener('click', () => {
-    dialog.querySelector('img').src = preview.src;
-    dialog.showModal();
-  });
-  dialog.querySelector('button').addEventListener('click', () => dialog.close());
-  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
-
-  // 面板高于窗口时，先让它自然滚动到底部，再停留；短面板停在顶部。
-  // 两栏共用 grid 的边界，因此页面顶部与底部保持自然对齐。
-  const panels = [taskCard, analysisCard];
-  const updateStickyOffsets = () => {
-    const containerRect=document.querySelector('main.grid').getBoundingClientRect();
-    const containerBottom=containerRect.bottom;
-    panels.forEach(panel => {
-      const height=panel.getBoundingClientRect().height;
-      const base=Math.min(20, window.innerHeight-height-20);
-      // 短栏小于窗口时，单纯 top:20px 无法在页尾对齐底边。
-      // 临近容器末端才逐渐下移；中段仍保持顶部停留。
-      const travel=Math.max(0,window.innerHeight-height-40);
-      // 尚未滚动到主工作区时，两栏必须从同一顶边开始；不能提前触发页尾补偿。
-      const scrolledIntoWorkspace=Math.max(0,20-containerRect.top);
-      const ending=Math.min(travel,scrolledIntoWorkspace,Math.max(0,window.innerHeight+travel-containerBottom));
-      const top=base+ending;
-      const value=top+'px';
-      if(panel.style.getPropertyValue('--panel-sticky-top')!==value)panel.style.setProperty('--panel-sticky-top',value);
-    });
-  };
-  const panelResizeObserver = new ResizeObserver(updateStickyOffsets);
-  panels.forEach(panel => panelResizeObserver.observe(panel));
-  window.addEventListener('resize', updateStickyOffsets);
-  let scrollFrame=0;
-  window.addEventListener('scroll',()=>{
-    if(scrollFrame)return;
-    scrollFrame=requestAnimationFrame(()=>{scrollFrame=0;updateStickyOffsets();});
-  },{passive:true});
-  updateStickyOffsets();
+  function keyboardTabs(ids){ids.forEach((id,index)=>$('#'+id).addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const target=ids[e.key==='Home'?0:e.key==='End'?ids.length-1:(index+1)%ids.length];$('#'+target).click();$('#'+target).focus();}));}keyboardTabs(['sampleSourceTab','uploadSourceTab']);keyboardTabs(['taskConfigTab','taskDetailTab']);
+  analysis.classList.add('analysis-workspace');analysis.prepend(make('header','mission-heading',`<div><span class="section-index">INSPECTION / 当前巡检</span><h2 id="missionTitle">配置巡检任务</h2></div><div class="mission-badges"><span id="missionState" class="state-badge">待启动</span><span class="source-badge">${online?'预置案例':'真实调用'}</span></div>`));
+  const risk=make('aside','risk-column');risk.id='riskColumn';risk.setAttribute('aria-label','风险研判与区域信息');risk.append($('#result'));analysis.append(risk);
+  risk.append(make('section','location-panel',`<div class="compact-heading"><h2>${icon('map')} 区域位置</h2><span>文字定位</span></div><div class="location-map" aria-label="装饰性区域示意，不代表事件位置"><span>区域示意 / 非实时</span><div class="location-no-point">${icon('pin')}<strong>暂无精确定位坐标</strong></div></div><div class="location-copy"><span>位置描述</span><p id="eventLocation"></p><small>依据文字描述展示，未在图中标注风险点。</small></div>`));
+  const execution=make('section','execution-panel');execution.id='executionPanel';execution.setAttribute('aria-label','研判与处置流程');const oldHeading=analysis.querySelector(':scope > h2');oldHeading.textContent='研判与处置流程';execution.append(oldHeading,$('.steps'),$('#status'));analysis.append(execution);
+  $('#status').setAttribute('role','status');$('#status').setAttribute('aria-live','polite');$('.steps').setAttribute('aria-label','六阶段任务流程');
+  document.querySelectorAll('.step').forEach((step,i)=>{const label=step.textContent;step.replaceChildren(make('span','step-number',String(i+1)),make('span','step-label',label),make('small','step-state','等待处理'));});
+  const options=[...picker.options].filter(o=>o.value),strip=$('.thumbnail-strip');text($('#basinSourceCount'),String(options.length).padStart(2,'0'));
+  for(const [index,option] of options.entries()){const button=make('button','thumbnail');button.type='button';button.dataset.file=option.value;button.setAttribute('aria-label','选择样例：'+option.textContent);button.title=option.textContent;const thumb=document.createElement('img');thumb.alt='';thumb.loading='lazy';thumb.src=online?'assets/test-images/'+encodeURIComponent(option.value):'/local-test-image/'+encodeURIComponent(option.value);button.append(thumb,make('span','thumbnail-index',String(index+1).padStart(2,'0')));button.onclick=()=>{if(picker.disabled)return;picker.value=option.value;selectSource('sample');picker.dispatchEvent(new Event('change',{bubbles:true}));};strip.append(button);}
+  let readyBefore=false;const region=$('#taskConfigPane input[readonly]');
+  const sourceCaption=()=>{const isUpload=preview.src.startsWith('blob:')&&file.files?.[0];const label=isUpload?'本机图片 / '+file.files[0].name:picker.selectedOptions[0]?.textContent||'巡检影像';text($('#imageSourceCaption'),label);text($('#detailImage'),label);text($('#imageDimensions'),preview.naturalWidth?`${preview.naturalWidth} × ${preview.naturalHeight}`:'等待影像');const index=options.findIndex(o=>o.value===picker.value);text($('#imageNumber'),isUpload?'本机预览':index>=0?`${index+1} / ${options.length}`:'默认影像');strip.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed',String(!isUpload&&button.dataset.file===picker.value)));text($('#detailRegion'),region.value);text($('#detailTask'),$('#task').value);text($('#detailSource'),online?'预置案例 · 非实时监测':'当前任务影像与平台返回');};
+  preview.addEventListener('load',()=>{$('.image-stage').classList.remove('image-unavailable');sourceCaption();});preview.addEventListener('error',()=>{$('.image-stage').classList.add('image-unavailable');text($('#imageDimensions'),'加载失败');});if(preview.complete&&!preview.naturalWidth)$('.image-stage').classList.add('image-unavailable');picker.addEventListener('change',sourceCaption);file.addEventListener('change',sourceCaption);$('#task').addEventListener('input',sourceCaption);new MutationObserver(()=>text($('#imageDimensions'),'加载中')).observe(preview,{attributes:true,attributeFilter:['src']});sourceCaption();
+  const dialog=make('dialog','image-dialog','<div class="dialog-toolbar"><strong id="imageDialogTitle">巡检影像 · 原图查看</strong><button type="button" class="secondary">关闭 ×</button></div><img alt="放大的巡检影像">');dialog.setAttribute('aria-labelledby','imageDialogTitle');document.body.append(dialog);$('#expandImage').onclick=()=>{dialog.querySelector('img').src=preview.src;dialog.showModal();};dialog.querySelector('button').onclick=()=>dialog.close();dialog.addEventListener('click',e=>{if(e.target===dialog)dialog.close();});
+  let labelIndex=0;document.querySelectorAll('label.label').forEach(label=>{const control=label.nextElementSibling;if(!control?.matches('input,select,textarea'))return;if(!control.id)control.id='mission-field-'+(++labelIndex);label.htmlFor=control.id;});nav.querySelectorAll('a').forEach(link=>link.addEventListener('click',()=>{nav.querySelectorAll('a').forEach(a=>a.removeAttribute('aria-current'));link.setAttribute('aria-current','page');if(link.hash==='#taskPanel')selectTask('config');}));
+  window.inspectionUI={update(state){
+    const {busy,assessmentReady,hasOrder,decision,observationState,events=[],selectedEvidence=null,operation='',operationError=''}=state;
+    const phase=busy?'处理中':decision?'已记录决定':hasOrder?'待审批':assessmentReady?'待人工复核':observationState==='error'?'研判失败':'待启动';text($('#basinPhase'),phase);text($('#missionState'),phase);text($('#detailState'),phase);text($('#basinEventCount'),assessmentReady?String(events.length).padStart(2,'0'):'—');const event=events[selectedEvidence??0];text($('#missionTitle'),assessmentReady?(event?.risk_type||'本次巡检研判完成'):'洪涝巡检 · 任务工作台');text($('#eventLocation'),assessmentReady?(event?.location||'本次结果未提供事件位置'):region.value);$('#missionState').dataset.state=observationState==='error'?'error':busy?'busy':assessmentReady?'complete':'idle';
+    if(assessmentReady&&!readyBefore)selectTask('detail');if(!assessmentReady&&readyBefore)selectTask('config');readyBefore=assessmentReady;strip.querySelectorAll('button').forEach(button=>{button.disabled=busy;});
+    const done=decision?6:hasOrder?5:assessmentReady?3:0,current=decision?-1:hasOrder?5:assessmentReady?(operation==='workorder'?4:3):busy?0:-1;
+    document.querySelectorAll('.step').forEach((step,i)=>{const failed=(observationState==='error'&&i===0)||(operationError&&i===(operationError==='workorder'?4:operationError==='approval'?5:3));const status=failed?'error':i<done?'complete':i===current?'current':'waiting';step.dataset.phase=status;step.classList.toggle('active',status==='complete'||status==='current');step.setAttribute('aria-current',status==='current'?'step':'false');text(step.querySelector('.step-number'),status==='complete'?'✓':failed?'!':String(i+1));text(step.querySelector('.step-state'),failed?'执行失败':status==='complete'?'已完成':status==='current'?(busy?'处理中':'等待处理'):'等待处理');});sourceCaption();
+  }};
 })();
