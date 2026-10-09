@@ -417,7 +417,7 @@ createServer(async (req,res)=>{
     return sendFile(req,res,join(frontendDir,name),name.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8');
   }
   if(isRead(req)&&req.url==='/experience/'){
-    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});
     return res.end(req.method==='HEAD'?'':experiencePage);
   }
   if(isRead(req)&&req.url==='/experience'){
@@ -471,7 +471,7 @@ createServer(async (req,res)=>{
   }
   // 只有首页返回演示页。以前任何 GET 路径都回落到演示页，像 /.env.local 这类请求
   // 也会拿到 200，看起来仿佛服务在提供这些文件。
-  if(req.method==='GET'&&(req.url==='/'||req.url==='/index.html'||req.url?.startsWith('/?'))){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(workspacePage)}
+  if(req.method==='GET'&&(req.url==='/'||req.url==='/index.html'||req.url?.startsWith('/?'))){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"});return res.end(workspacePage)}
   if(req.method==='POST'&&(req.url==='/api/mission'||req.url==='/api/review'||req.url==='/api/workorder'||req.url==='/api/disposition')){
     // 按 Buffer 收集再整体解码：直接用字符串累加会把跨 chunk 切开的中文拆坏。
     const parts=[];req.on('data',c=>parts.push(c));
@@ -494,4 +494,13 @@ createServer(async (req,res)=>{
     return;
   }
   res.writeHead(404);res.end();
-}).listen(port,'127.0.0.1',()=>console.log(`真实演示页：http://127.0.0.1:${port}`));
+}).on('error', error => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`端口 ${port} 已被占用，本次服务未启动。浏览器可能仍在访问旧进程；请先停止旧演示服务，再运行 npm run demo。`);
+  } else console.error(`演示服务启动失败：${error.message}`);
+  process.exitCode = 1;
+}).listen(port,'127.0.0.1',()=>{
+  console.log(`真实演示页：http://127.0.0.1:${port}/`);
+  console.log(`预置案例演示：http://127.0.0.1:${port}/experience/`);
+  console.log('两个入口共用 online-experience 下的最新前端；修改服务代码或切换分支后请重启。');
+});

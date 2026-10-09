@@ -18,6 +18,28 @@ test("首页可以打开且不含任何临时图床直链", async () => {
   assert.match(html, /localSourcePicker/);
 });
 
+test("真实页与体验页加载同一套前端，并禁止缓存旧页面", async () => {
+  for (const path of ['/', '/experience/']) {
+    const response = await server.get(path);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const html = await response.text();
+    const base = new URL(path, server.base);
+    const refs = [...html.matchAll(/(?:href|src)="([^"]+\.(?:css|js))"/g)].map(match => match[1]);
+    for (const name of ['ui.css', 'ui.js', 'workspace.js']) {
+      const ref = refs.find(ref => ref === name || ref === '/' + name);
+      assert.ok(ref, `${path} 未接入 ${name}`);
+      const asset = await fetch(new URL(ref, base));
+      assert.equal(asset.status, 200);
+      assert.equal(asset.headers.get('cache-control'), 'no-store');
+      assert.equal(await asset.text(), readFileSync(new URL('../online-experience/' + name, import.meta.url), 'utf8'));
+    }
+  }
+  const image = await server.get('/experience/assets/test-images/02_bridge_debris_medium.jpg');
+  assert.equal(image.status, 200);
+  assert.match(image.headers.get('content-type'), /image\/jpeg/);
+});
+
 test("首页内联脚本可以被解析，且失败信息渲染器在位", async () => {
   const html = await (await server.get("/")).text();
   const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);

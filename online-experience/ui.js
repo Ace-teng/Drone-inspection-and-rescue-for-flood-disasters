@@ -111,14 +111,17 @@
   // 两栏共用 grid 的边界，因此页面顶部与底部保持自然对齐。
   const panels = [taskCard, analysisCard];
   const updateStickyOffsets = () => {
-    const containerBottom=document.querySelector('main.grid').getBoundingClientRect().bottom;
+    const containerRect=document.querySelector('main.grid').getBoundingClientRect();
+    const containerBottom=containerRect.bottom;
     panels.forEach(panel => {
       const height=panel.getBoundingClientRect().height;
       const base=Math.min(20, window.innerHeight-height-20);
       // 短栏小于窗口时，单纯 top:20px 无法在页尾对齐底边。
       // 临近容器末端才逐渐下移；中段仍保持顶部停留。
       const travel=Math.max(0,window.innerHeight-height-40);
-      const ending=Math.min(travel,Math.max(0,window.innerHeight+travel-containerBottom));
+      // 尚未滚动到主工作区时，两栏必须从同一顶边开始；不能提前触发页尾补偿。
+      const scrolledIntoWorkspace=Math.max(0,20-containerRect.top);
+      const ending=Math.min(travel,scrolledIntoWorkspace,Math.max(0,window.innerHeight+travel-containerBottom));
       const top=base+ending;
       const value=top+'px';
       if(panel.style.getPropertyValue('--panel-sticky-top')!==value)panel.style.setProperty('--panel-sticky-top',value);
