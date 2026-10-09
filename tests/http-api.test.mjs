@@ -107,18 +107,34 @@ test("模拟工单审批可以落盘，并且拒绝非法决策", async () => {
   assert.equal(record.dispatchExecuted, false);
 
   const rejected = await server.postJson("/api/disposition", { workOrderId, decision: "reject", previousDecision: "approve" });
-  assert.equal(rejected.status, 200);
+  assert.equal(rejected.status, 409);
+  const revoked = await server.postJson("/api/disposition", { workOrderId, decision: "revoke", previousDecision: "approve" });
+  assert.equal(revoked.status, 200);
+  assert.equal((await server.postJson("/api/disposition", { workOrderId, decision: "reject" })).status, 200);
 
   const lines = readFileSync(join(testDataDir, "workorder-dispositions.jsonl"), "utf8").trim().split(/\r?\n/);
   const mine = lines.map(line => JSON.parse(line)).filter(item => item.workOrderId === workOrderId);
-  assert.equal(mine.length, 2);
-  assert.deepEqual(mine.map(item => item.decision), ["approve", "reject"]);
+  assert.equal(mine.length, 3);
+  assert.deepEqual(mine.map(item => item.decision), ["approve", "revoke", "reject"]);
 
   for (const body of [{}, { workOrderId }, { workOrderId, decision: "dispatch" }, { decision: "approve" }]) {
     const response = await server.postJson("/api/disposition", body);
     assert.notEqual(response.status, 200, `${JSON.stringify(body)} 不应被接受`);
     assert.match((await response.json()).error, /无效的工单审批请求/);
   }
+});
+
+test("并发重复审批只落盘一次，过期决定不能撤销", async () => {
+  const workOrderId = `WO-DEMO-DUPLICATE-${process.pid}`;
+  const responses = await Promise.all(Array.from({length:5}, () => server.postJson('/api/disposition', {workOrderId,decision:'approve',note:'并发审批'})));
+  assert.ok(responses.every(response => response.status === 200));
+  const records = await Promise.all(responses.map(response => response.json()));
+  assert.equal(records.filter(record => record.deduplicated).length, 4);
+  const history = readFileSync(join(testDataDir, 'workorder-dispositions.jsonl'), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line)).filter(record => record.workOrderId === workOrderId);
+  assert.equal(history.length, 1);
+  assert.equal((await server.postJson('/api/disposition', {workOrderId,decision:'revoke',previousDecision:'reject'})).status, 409);
+  assert.equal((await server.postJson('/api/disposition', {workOrderId,decision:'revoke',previousDecision:'approve'})).status, 200);
+  assert.equal((await server.postJson('/api/disposition', {workOrderId,decision:'reflight'})).status, 200);
 });
 
 test("审批意见长度被截断到 500 字", async () => {

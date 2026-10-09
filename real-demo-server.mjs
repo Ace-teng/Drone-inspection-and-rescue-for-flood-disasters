@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
-import { appendFile, mkdir } from "node:fs/promises";
-import { createReadStream, existsSync } from "node:fs";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadTestImageCatalog, resolveCatalogImage } from "./lib/test-images.mjs";
 import { AgentGatewayError, createAgentClient } from "./lib/agent-gateway.mjs";
-import { dataDir } from "./lib/paths.mjs";
+import { dataDir, repoRoot } from "./lib/paths.mjs";
 import {
   UploadError,
   buildObjectKey,
@@ -46,7 +46,7 @@ function failureText(d,fallback){const parts=[(d&&d.error)||fallback];if(d&&d.hi
 run.onclick=async()=>{setBusy(true);result.style.display='none';review.style.display='none';steps.forEach((x,i)=>x.classList.toggle('active',i===0));status.textContent='正在创建智能体会话并执行任务规划…';let i=0;const timer=setInterval(()=>{i=Math.min(i+1,3);steps.forEach((x,n)=>x.classList.toggle('active',n<=i));status.textContent=['正在创建智能体会话并执行任务规划…','正在由视觉 Agent 分析巡检图片…','正在结合知识库进行风险研判…','正在等待人工复核结果…'][i]},25000);try{const r=await fetch('/api/mission',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({imageUrl:document.querySelector('#url').value,taskText:document.querySelector('#task').value})});const d=await r.json();if(!r.ok)throw Error(failureText(d,'调用失败'));clearInterval(timer);sessionId=d.sessionId;steps.slice(0,4).forEach(x=>x.classList.add('active'));status.textContent='真实调用完成：已形成候选风险事件，请进行人工复核。';renderOutput(d.output);result.style.display='block';review.style.display='block'}catch(e){clearInterval(timer);status.textContent='调用失败：'+e.message}finally{setBusy(false)}};
 async function reviewCall(text,action='modify'){if(!sessionId)return;setBusy(true);status.textContent=action==='cancel'?'正在向平台提交取消处置确认…':'正在携带原始图片与人工决定重新提交平台…';try{const r=await fetch('/api/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,text,imageUrl:document.querySelector('#url').value,taskText:document.querySelector('#task').value})});const d=await r.json();if(!r.ok)throw Error(failureText(d,'复核提交失败'));steps.forEach(x=>x.classList.add('active'));reviewOut.textContent=d.output;const panel=document.querySelector('#reviewReplyPanel');panel.style.display='block';status.textContent=action==='cancel'?'取消处置已确认：本页模拟工单已撤销，请查看下方“平台最终回复”。':'人工复核已完成：平台最终回复已在下方展开。';panel.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){status.textContent=e.message==='Failed to fetch'?'复核提交未能连接本地演示服务。请刷新页面后重试；若仍失败，请检查校园网连接。':'复核失败：'+e.message}finally{setBusy(false)}}
 async function workOrderCall(){setBusy(true);status.textContent='正在调用 jfg4 生成待审批模拟工单…';try{const r=await fetch('/api/workorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assessment:out.textContent})});const d=await r.json();if(!r.ok)throw Error(failureText(d,'工单生成失败'));steps.forEach(x=>x.classList.add('active'));status.textContent='模拟工单已由 jfg4 生成：待人工审批，不执行真实派遣。';reviewOut.textContent=d.output}catch(e){status.textContent='工单生成失败：'+e.message}finally{setBusy(false)}}
-document.querySelector('#confirm').onclick=workOrderCall;document.querySelector('#cancel').onclick=()=>{const workorder=document.querySelector('#workorder');if(workorder){workorder.style.display='none';document.querySelector('#workorderCard').innerHTML='';document.querySelector('#workorderOutput').textContent=''}const final=document.querySelector('#finalDisposition');if(final){final.style.display='none';const feedback=document.querySelector('#finalFeedback');if(feedback){feedback.style.display='none';feedback.textContent=''}final.querySelectorAll('button').forEach(x=>x.disabled=false)}const panel=document.querySelector('#reviewReplyPanel');panel.style.display='none';reviewOut.textContent='';status.textContent='取消处置已完成：本次仅保留风险研判报告，模拟工单已撤销，未提交新的平台任务。'};document.querySelector('#modify').onclick=()=>{const t=document.querySelector('#reviewText').value.trim();reviewCall(t.startsWith('修改研判：')?t:'修改研判：'+(t||'请降低风险等级并补充人工复核依据'))};
+document.querySelector('#confirm').onclick=workOrderCall;document.querySelector('#cancel').onclick=()=>{const workorder=document.querySelector('#workorder');if(workorder){workorder.style.display='none';document.querySelector('#workorderCard').innerHTML='';document.querySelector('#workorderOutput').textContent=''}const final=document.querySelector('#finalDisposition');if(final){final.style.display='none';const feedback=document.querySelector('#finalFeedback');if(feedback){feedback.style.display='none';feedback.textContent=''}final.querySelectorAll('button').forEach(x=>x.disabled=false)}const panel=document.querySelector('#reviewReplyPanel');panel.style.display='none';reviewOut.textContent='';status.textContent='取消处置已完成：本次仅保留风险研判报告，模拟工单已撤销，未提交新的平台任务。'};document.querySelector('#modify').onclick=()=>{const t=document.querySelector('#reviewText').value.trim();return reviewCall(t.startsWith('修改研判：')?t:'修改研判：'+(t||'请降低风险等级并补充人工复核依据'))};
 </script></body></html>`;
 
 // 素材清单只在这里读取一次；网页选择器、/api/test-images 和本地预览都用同一份数据。
@@ -307,11 +307,31 @@ async function createWorkOrder(body) {
   return { sessionId, output };
 }
 
+let dispositionQueue = Promise.resolve();
 async function recordDisposition(body) {
+  // 串行校验与写入：并发点击不会在两个请求中同时读到“待审批”。
+  const operation = dispositionQueue.then(() => commitDisposition(body));
+  dispositionQueue = operation.catch(() => {});
+  return operation;
+}
+
+async function commitDisposition(body) {
   const allowed = new Set(["approve", "reject", "reflight", "revoke"]);
   if (!body?.workOrderId || !allowed.has(body?.decision)) {
     throw invalidInput(`无效的工单审批请求：需要 workOrderId 和 decision（${[...allowed].join("/")}）。`, "这是本地校验失败，与平台无关；正常点击页面按钮不会触发。");
   }
+  const logPath = join(runtimeDataDir, "workorder-dispositions.jsonl");
+  let history = [];
+  try {
+    history = (await readFile(logPath, "utf8")).split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const latest = history.findLast(record => record.workOrderId === body.workOrderId);
+  const active = latest && latest.decision !== 'revoke' ? latest.decision : '';
+  // 相同最终决定是幂等请求，直接返回之前的记录，不再次追加。
+  if (active && body.decision === active) return { ...latest, deduplicated: true };
+  const conflict = message => new AgentGatewayError('input.conflict', message, {responseStatus:409,hint:'请撤销当前决定后重新审批，或刷新查看当前工单状态。'});
+  if (active && body.decision !== 'revoke') throw conflict('该工单已有最终决定，必须先撤销当前决定再重新审批。');
+  if (body.decision === 'revoke' && (!active || body.previousDecision !== active)) throw conflict('当前决定不存在或已经改变，无法撤销这次审批。');
   const record = {
     workOrderId: body.workOrderId,
     decision: body.decision,
@@ -323,7 +343,7 @@ async function recordDisposition(body) {
   };
   // 运行期目录可用 DEMO_DATA_DIR 覆盖，自动化测试因此不会写进真实审计记录。
   await mkdir(runtimeDataDir, { recursive: true });
-  await appendFile(join(runtimeDataDir, "workorder-dispositions.jsonl"), `${JSON.stringify(record)}\n`, "utf8");
+  await appendFile(logPath, `${JSON.stringify(record)}\n`, "utf8");
   return record;
 }
 
@@ -386,7 +406,28 @@ async function handleUpload(req) {
   }
 }
 
+// 两种运行模式共用展示层，在线体验保留预置结果，真实模式保留平台调用。
+const frontendDir = join(repoRoot, 'online-experience');
+const workspacePage = uploadDemoPage.replace('</body>', '<link rel="stylesheet" href="/ui.css"><script src="/ui.js"></script><script src="/workspace.js"></script></body>');
+const experiencePage = readFileSync(join(frontendDir, 'index.html'), 'utf8');
+
 createServer(async (req,res)=>{
+  if(isRead(req)&&['/ui.css','/ui.js','/workspace.js','/experience/ui.css','/experience/ui.js','/experience/workspace.js'].includes(req.url)){
+    const name=req.url.split('/').pop();
+    return sendFile(req,res,join(frontendDir,name),name.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8');
+  }
+  if(isRead(req)&&req.url==='/experience/'){
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
+    return res.end(req.method==='HEAD'?'':experiencePage);
+  }
+  if(isRead(req)&&req.url==='/experience'){
+    res.writeHead(302,{Location:'/experience/'});return res.end();
+  }
+  if(isRead(req)&&req.url?.startsWith('/experience/assets/test-images/')){
+    const image=resolveCatalogImage(catalog,decodeURIComponent(req.url.slice('/experience/assets/test-images/'.length).split('?')[0]));
+    if(!image)return sendPlain(res,404,'素材不存在或未登记在素材清单中');
+    return sendFile(req,res,image.path,image.contentType);
+  }
   if(isRead(req)&&req.url?.startsWith('/local-test-image/')){
     const image=resolveCatalogImage(catalog,decodeURIComponent(req.url.slice('/local-test-image/'.length).split('?')[0]));
     if(!image)return sendPlain(res,404,'素材不存在或未登记在素材清单中');
@@ -430,7 +471,7 @@ createServer(async (req,res)=>{
   }
   // 只有首页返回演示页。以前任何 GET 路径都回落到演示页，像 /.env.local 这类请求
   // 也会拿到 200，看起来仿佛服务在提供这些文件。
-  if(req.method==='GET'&&(req.url==='/'||req.url==='/index.html'||req.url?.startsWith('/?'))){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(uploadDemoPage)}
+  if(req.method==='GET'&&(req.url==='/'||req.url==='/index.html'||req.url?.startsWith('/?'))){res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});return res.end(workspacePage)}
   if(req.method==='POST'&&(req.url==='/api/mission'||req.url==='/api/review'||req.url==='/api/workorder'||req.url==='/api/disposition')){
     // 按 Buffer 收集再整体解码：直接用字符串累加会把跨 chunk 切开的中文拆坏。
     const parts=[];req.on('data',c=>parts.push(c));
