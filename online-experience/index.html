@@ -269,14 +269,14 @@ document.querySelector('#confirm').onclick=workOrderCall;document.querySelector(
     const selected = file.files && file.files[0]; if (!selected) return;
     if (!/^image\/(jpeg|png)$/.test(selected.type)) { $('#uploadHint').textContent = '在线体验版仅接受 JPG/PNG 图片预览。'; return; }
     if (objectUrl) URL.revokeObjectURL(objectUrl); objectUrl = URL.createObjectURL(selected); preview.src = objectUrl; picker.value = '';
-    $('#uploadHint').textContent = `已加载“${selected.name}”用于本页预览；在线体验不上传文件、不保存图片。`;
+    $('#uploadHint').textContent = `已加载“${selected.name}”用于本机预览。此页面只能研判预置案例；分析自己的图片需在本地真实版配置百炼与对象存储。`;
     upload.disabled = false;
   };
   // 原页面会异步读取本地对象存储配置；在线版没有该后端，持续保持体验按钮可用。
   const unlockUpload = () => { upload.disabled = false; };
   const setOnlineUploadHint = () => { $('#uploadHint').textContent = '在线体验版支持本页 JPG/PNG 预览，不会上传或保存图片；真实系统在本地答辩环境安全接入对象存储。'; };
   unlockUpload(); setOnlineUploadHint(); setTimeout(unlockUpload, 100); setTimeout(unlockUpload, 800); setTimeout(setOnlineUploadHint, 900);
-  upload.onclick = () => { $('#uploadHint').textContent = '在线体验版已使用当前图片进行本地预览；真实系统在答辩本地环境会将图片安全上传至对象存储。'; };
+  upload.onclick = () => { $('#uploadHint').textContent = '这张图片已在本机预览，尚未上传或研判。分析自己的图片需使用本地真实版。'; };
 
   $('#run').onclick = () => {
     buttonsBusy(true); result.style.display = 'none'; review.style.display = 'none';

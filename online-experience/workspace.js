@@ -29,7 +29,10 @@
       running:['正在分析巡检影像','正在等待研判结果。扫描动效仅表示处理中，不代表实际检测进度。'],
       error:['本次研判未完成','请结合执行状态中的原因检查图片或连接，再重新研判。']
     };
-    const state=states[observationState]||states.idle;
+    const previewOnly=online&&$('#inspectionPreview').src.startsWith('blob:');
+    const state=previewOnly&&observationState==='idle'
+      ? ['本机图片已预览','在线体验页仅能研判预置案例。分析自己的图片，请使用配置了百炼和对象存储的本地真实版。']
+      : states[observationState]||states.idle;
     setText($('#observationTitle'),state[0]);setText($('#observationDescription'),state[1]);
     $('#retryInspection').hidden=observationState!=='error';$('#retryInspection').disabled=busy;
     emptyAssessment.querySelector('.observation-glyph').textContent=observationState==='error'?'!':'';
@@ -124,7 +127,9 @@
     $('#confirm').disabled=busy||!assessmentReady||hasOrder||reviewNeedsAssessment;
     $('#modify').disabled=busy||!assessmentReady||hasOrder;
     $('#cancel').disabled=busy||!assessmentReady||hasOrder;
-    $('#run').disabled=busy;
+    const previewOnly=online&&$('#inspectionPreview').src.startsWith('blob:');
+    $('#run').disabled=busy||previewOnly;
+    if(online)$('#run').firstChild.textContent=previewOnly?'本机图片仅可预览':'启动在线巡检研判';
     ['approveSim','rejectSim','reflightSim'].forEach(id=>{const button=$('#'+id),disabled=busy||!hasOrder||Boolean(decision);if(button.disabled!==disabled)button.disabled=disabled;});
     const undo=$('#undoDisposition');if(undo&&undo.disabled!==busy)undo.disabled=busy;
     $('#finalNote').readOnly=busy||Boolean(decision);
@@ -140,7 +145,14 @@
     ['output','summary','events','reviewOutput','workorderCard','workorderOutput','finalFeedback'].forEach(id=>$('#'+id).replaceChildren());
     $('#reviewText').value='';$('#finalNote').value='';metrics.replaceChildren();selectTab('review');sync();
   };
-  const invalidate = () => {sourceRevision++;if(assessmentReady||hasOrder||observationState!=='idle'){reset();$('#status').textContent='任务输入已改变，请重新启动研判。';}};
+  const invalidate = () => {
+    sourceRevision++;
+    if(assessmentReady||hasOrder||observationState!=='idle')reset();
+    if(online&&$('#inspectionPreview').src.startsWith('blob:'))$('#status').textContent='图片已在本机预览。在线体验没有自选图片研判服务，请选择预置案例；真实研判请使用已配置平台和存储的本地版。';
+    else if(online)$('#status').textContent='已选择预置案例，可以启动在线演示研判。';
+    else $('#status').textContent='任务输入已改变，请重新启动研判。';
+    sync();
+  };
   $('#localSourcePicker').addEventListener('change',invalidate);$('#uploadFile').addEventListener('change',invalidate);$('#url').addEventListener('input',invalidate);$('#task').addEventListener('input',invalidate);
   const originalUpload=$('#uploadBtn').onclick;
   $('#uploadBtn').onclick=async event=>{
@@ -151,7 +163,7 @@
   const originalRun=$('#run').onclick;
   $('#run').onclick=async event=>{
     if(busy)return;
-    if(online&&$('#inspectionPreview').src.startsWith('blob:')){reset();observationState='error';$('#status').textContent='当前上传图片仅供预览。预置体验只能研判已有样例；请选择下方缩略图，或切换真实调用模式分析自己的图片。';sync();return;}
+    if(online&&$('#inspectionPreview').src.startsWith('blob:')){reset();$('#status').textContent='当前图片仅供本机预览。在线体验只能研判预置案例；自己的图片需在本地真实版上传分析。';sync();return;}
     reset();busy=true;observationState='running';operation='mission';assessmentRevision=sourceRevision;sync();
     try{await originalRun(event);}
     catch(error){busy=false;observationState='error';$('#status').textContent='研判未完成：'+error.message;sync();}

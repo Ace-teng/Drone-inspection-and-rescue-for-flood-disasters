@@ -133,6 +133,8 @@ node real-demo-server.mjs
 
 `http://127.0.0.1:8789/` 保留真实智能体调用，需要按上面的步骤配置密钥与网络。两种模式共用 `online-experience/ui.css`、`online-experience/ui.js` 和 `online-experience/workspace.js` 展示与交互层。
 
+GitHub Pages 在线体验页允许选择本机图片查看画面，但不运行自选图片的模型研判。选图后页面会标明“仅本机预览”并停用演示研判按钮；分析自己的图片须在配置了百炼密钥和对象存储的本地真实模式上传后运行。
+
 ## 页面与队员版本不一致时
 
 `npm run demo` 会显示项目目录、当前分支和提交号，以及真实调用和预置案例两个地址。队员最新界面在 `main` 分支；请先保存本地改动，再用 `git switch main` 和 `git pull --ff-only origin main` 同步。切换分支或更新服务代码后，停止旧服务再重新启动；仅刷新网页不会更新旧 Node 进程内的页面。
